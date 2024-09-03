@@ -90,7 +90,7 @@ class MLP(nn.Module):
 
 class Block(nn.Module):
 
-    def __init__(self, n_embed, num_heads, blk_dropout, is_casual=True, bias=True): # This is nice design, one config deciding hyperparameters on all layers
+    def __init__(self, n_embed, num_heads, blk_dropout=0.1, is_casual=True, bias=True): # This is nice design, one config deciding hyperparameters on all layers
         super().__init__()
         self.ln_1 = LayerNorm(n_embed, bias=bias)
         head_size = n_embed // num_heads

@@ -12,7 +12,7 @@ class DecoderLanguageModel(nn.Module):
         self.position_embedding_table = nn.Embedding(1000, n_embd)
         if use_images:
             self.image_projection = MultiModalProjector(n_embd, image_embed_dim)
-        self.blocks = nn.Sequential(*[Block(n_embd, num_heads, is_decoder=True) for _ in range(n_layer)])
+        self.blocks = nn.Sequential(*[Block(n_embd, num_heads, is_casual=False, bias=True) for _ in range(n_layer)])
         self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 

@@ -10,7 +10,7 @@ class ViT(nn.Module):
         num_patches = (img_size // patch_size) ** 2
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, num_hiddens))
         self.dropout = nn.Dropout(emb_dropout)
-        self.blocks = nn.ModuleList([Block(num_hiddens, num_heads, blk_dropout, is_decoder=False, bias=bias) for _ in range(num_blks)])
+        self.blocks = nn.ModuleList([Block(num_hiddens, num_heads, blk_dropout, is_casual=False, bias=bias) for _ in range(num_blks)])
         self.layer_norm = nn.LayerNorm(num_hiddens)
 
     def forward(self, X):
