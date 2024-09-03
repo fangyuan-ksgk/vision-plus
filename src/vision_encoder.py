@@ -3,14 +3,14 @@ import torch.nn as nn
 from component import PatchEmbeddings, Block
 
 class ViT(nn.Module):
-    def __init__(self, img_size, patch_size, num_hiddens, num_heads, num_blks, emb_dropout, blk_dropout):
+    def __init__(self, img_size, patch_size, num_hiddens, num_heads, num_blks, emb_dropout, blk_dropout, bias=True):
         super().__init__()
         self.patch_embedding = PatchEmbeddings(img_size, patch_size, num_hiddens)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, num_hiddens))
         num_patches = (img_size // patch_size) ** 2
         self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, num_hiddens))
         self.dropout = nn.Dropout(emb_dropout)
-        self.blocks = nn.ModuleList([Block(num_hiddens, num_heads, blk_dropout, is_decoder=False) for _ in range(num_blks)])
+        self.blocks = nn.ModuleList([Block(num_hiddens, num_heads, blk_dropout, is_decoder=False, bias=bias) for _ in range(num_blks)])
         self.layer_norm = nn.LayerNorm(num_hiddens)
 
     def forward(self, X):
