@@ -1,0 +1,1 @@
+from multimodal_encoder.builder import build_vision_tower
