@@ -23,13 +23,26 @@ class MaskedDrop(nn.Moduel):
 
         masked_features = []
 
+        # It makes absolutely no sense to have different slicing for 'fixed' & 'ranged' mode, the only difference should be the num_keep here
+        # - I'll fix that, this file is a bit of a disaster
+
         for image_feature in image_features:
             num_tokens = image_feature.shape[0]
             if self.mode == "fixed":
                 num_keep = int(num_tokens * self.ratio)
-                masked_features.append(self.random_masking(image_feature.unsqueeze(0), num_keep)[0][0])
-                raise NotImplementedError("Random masking not implemented yet")
+                masked_features.append(self.random_masking(image_feature.unsqueeze(0), num_keep)[0]) # this one also seems wrong | we are slicing the first instance amoung the batch, super weird ....
+            elif self.mode == "range":
+                num_keep = int(num_tokens * random.uniform(self.ratio_lower, self.ratio_upper))
+                masked_features.append(self.random_masking(image_feature.unsqueeze(0), num_keep)[0])
+            elif self.mode == "cls_only":
+                masked_features.append(image_feature[0:1])
+            else:
+                raise ValueError(f"Unexpected masked drop mode: {self.mode}")
             
+        if self.mode not in ["range"] and (type(image_features) is not list or self.mode in ["cls_only"]):
+            masked_features = torch.stack(masked_features, dim=0)
+
+        return masked_features
 
     @property
     def config(self):
@@ -57,7 +70,7 @@ class MaskedDrop(nn.Moduel):
         ids_restore = torch.argsort(ids_shuffle, dim=1) # how to index back to original order
 
         ids_keep = ids_shuffle[:, :len_keep]
-        # x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D)) # redundant .repeat operation here, removed
+
         x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1))
 
         mask = torch.ones([N, L], device=x.device)
