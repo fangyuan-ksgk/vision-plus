@@ -25,7 +25,6 @@ class MaskedDrop(nn.Moduel):
 
         # It makes absolutely no sense to have different slicing for 'fixed' & 'ranged' mode, the only difference should be the num_keep here
         # - I'll fix that, this file is a bit of a disaster
-
         for image_feature in image_features:
             num_tokens = image_feature.shape[0]
             if self.mode == "fixed":
