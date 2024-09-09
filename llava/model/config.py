@@ -9,7 +9,7 @@ from typing import Optional
 class ModelArguments:
     model_name_or_path: str = field(default="facebook/opt-125m")
     
-    vision_tower: str = field(default="openai/clip-vit-base-patch32")    
+    mm_vision_tower: str = field(default="openai/clip-vit-base-patch32")    
     mm_vision_select_feature: str = field(default="patch")
     mm_vision_select_layer: int = field(default=-1)
     mm_hidden_size: int = field(default=768) # this one match the pre-trained vision encoder

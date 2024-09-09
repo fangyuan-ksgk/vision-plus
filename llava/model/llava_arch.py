@@ -1,19 +1,19 @@
 import torch
 import torch.nn as nn
-from .multimodal_encoder.builder import build_vision_tower
-from .multimodal_resampler.builder import build_vision_resampler
-from .multimodal_projector.builder import build_vision_projector
+from multimodal_encoder.builder import build_vision_tower
+from multimodal_resampler.builder import build_vision_resampler
+from multimodal_projector.builder import build_vision_projector
 
 class LlavaMetaModel(nn.Module):
     def __init__(self, config):
         super(LlavaMetaModel, self).__init__()
         
         if hasattr(config, "mm_vision_tower"):
-            self.vision_tower = build_vision_tower(config, delay_load=config.get("delay_load", False))
+            self.vision_tower = build_vision_tower(config, delay_load=getattr(config, "delay_load", False))
             self.vision_resampler = build_vision_resampler(config, vision_tower=self.vision_tower)
             self.mm_projector = build_vision_projector(config, vision_cfg=self.vision_tower.config)
 
-            if "unpad" in config.get("mm_patch_merge_type", ""):
+            if "unpad" in getattr(config, "mm_patch_merge_type", ""):
                 self.image_newline = nn.Parameter(torch.empty(config.hidden_size))
 
     def get_vision_tower(self):
@@ -49,6 +49,33 @@ class LlavaMetaModel(nn.Module):
         # Ensure gradients are enabled for mm_projector
         for p in self.mm_projector.parameters():
             p.requires_grad = True
+            
+            
+def unpad_image(tensor, original_size):
+    """
+    Unpads a PyTorch tensor of a padded and resized image.
 
-        
-        
+    Args:
+    tensor (torch.Tensor): The image tensor, assumed to be in CxHxW format.
+    original_size (tuple): The original size of the image (width, height).
+
+    Returns:
+    torch.Tensor: The unpadded image tensor.
+    """
+    original_width, original_height = original_size
+    current_height, current_width = tensor.shape[1:]
+    
+    padding_height = (current_height - original_height) // 2
+    padding_width = (current_width - original_width) // 2
+
+    height_start = padding_height
+    width_start = padding_width
+    
+    # Slice the tensor
+    unpadded_tensor = tensor[:, 
+                             height_start : current_height - height_start,
+                             width_start : current_width - width_start]
+
+    return unpadded_tensor
+
+
