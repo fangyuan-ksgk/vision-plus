@@ -122,7 +122,7 @@ class LlavaMetaForCausalLM(ABC):
         Images: [batch_size, num_images, C, H, W] (Assuming multiple images per sample)
         Input_ids represent image with IMAGE_TOKEN_INDEX, which is converted into num_patches tokens
         Labels, Input_ids, attention_mask are updated accordingly, padding is also applied here
-        -------------------
+        --------------------------------------------------------------------------------------------
         Error Report when number of IMAGE_TOKEN_INDEX in input_ids does not match number of images
         """
         vision_tower = self.get_vision_tower()
@@ -186,12 +186,11 @@ class LlavaMetaForCausalLM(ABC):
         
     def initialize_vision_tokenizer(self, model_args, tokenizer):
         """ 
-        Likely redundant implementation. 
-        Attemps to add special tokens for image-start, image-end, image-patch input ids
-        The weird part is that we do NOT wish to generate image, therefore updating output embedding is meaningless, making tokenizer update redundant
-        Fine-tuning the input embedding might be helpful with the extra tokens, we need to however fix the output embedding
-        :: Compared to having extra 'image_end' learnable embedding (image_newline), this seems to be a more elegant solution, albert introducing more training paramters (all the token embedding matrix)
-        Neverthless, this is good sport
+        Add special tokens for image-start, image-end, image-patch input ids
+        Output embedding is not trainable since we do NOT wish to generate image
+        Input embedding is the weight for token embedding matrix, output embedding is the weight for the final LM head (with softmax to predict the logits)
+        
+        This is useful to project special tokens into embedding space, the 'input_ids' need to convert an image into [IM_START_TOKEN, IMAGE_TOKEN_INDEX, IM_END_TOKEN] and goes through the above function
         """
         new_tokens = []
         
