@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn 
 import re 
 
-from pooler_projector import PoolerProjector
+from .pooler_projector import PoolerProjector
 
 class IdentityMap(nn.Module):
     def __init__(self):

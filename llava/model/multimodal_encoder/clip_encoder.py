@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils import rank0_print
+from .utils import rank0_print
 from transformers import CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
 
 
@@ -97,10 +97,6 @@ class CLIPVisionTower(nn.Module):
     @property
     def hidden_size(self):
         _hidden_size = self.config.hidden_size
-        if "slicefour" in self.select_feature:
-            _hidden_size *= 4
-        if "slice_m25811_f6" in self.select_feature:
-            _hidden_size *= 5
         return _hidden_size
 
     @property

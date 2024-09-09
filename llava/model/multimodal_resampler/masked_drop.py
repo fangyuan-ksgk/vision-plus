@@ -3,7 +3,7 @@ import torch.nn as nn
 
 import random 
 
-class MaskedDrop(nn.Moduel):
+class MaskedDrop(nn.Module):
     def __init__(self, model_args):
         super().__init__()
 
