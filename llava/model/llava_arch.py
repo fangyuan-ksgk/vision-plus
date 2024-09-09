@@ -130,8 +130,14 @@ class LlavaMetaForCausalLM(ABC):
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
 
         # Encode all images
-        batch_size, num_images, C, H, W = images.shape
-        image_features = self.encode_images(images.view(-1, C, H, W)).view(batch_size, num_images, -1, self.config.hidden_size)
+        image_features = []
+        assert len(images) == len(input_ids), f"Mismatch in batch_size of images and input_ids: {len(images)} vs {len(input_ids)}"
+        batch_size = len(images)
+        
+        for batch_images in images:
+            num_images, C, H, W = batch_images.shape
+            batch_image_features = self.encode_images(batch_images)
+            image_features.append(batch_image_features)
 
         # Process input ids and labels
         input_ids = [ids[mask] for ids, mask in zip(input_ids, attention_mask)]
@@ -139,9 +145,9 @@ class LlavaMetaForCausalLM(ABC):
 
         new_input_embeds = []
         new_labels = []
-        for batch_idx, cur_input_ids in enumerate(input_ids):
+        for batch_idx, (cur_input_ids, cur_image_features) in enumerate(zip(input_ids, image_features)):
             num_images_in_sequence = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
-            assert num_images_in_sequence == num_images, f"Mismatch in number of images in input_ids and images: {num_images_in_sequence} vs {num_images}"
+            assert num_images_in_sequence == cur_image_features.shape[0], f"Mismatch in number of images in input_ids and images: {num_images_in_sequence} vs {cur_image_features.shape[0]}"
 
             if num_images == 0:
                 cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)
@@ -154,7 +160,7 @@ class LlavaMetaForCausalLM(ABC):
             cur_input_ids_chunks = [cur_input_ids[split_indices[i]+1:split_indices[i+1]] for i in range(len(split_indices)-1) if split_indices[i+1] - split_indices[i] > 1]
             cur_labels_chunks = [labels[batch_idx][split_indices[i]+1:split_indices[i+1]] for i in range(len(split_indices)-1) if split_indices[i+1] - split_indices[i] > 1]
 
-            # Interleave text embeddings and image features
+            # Interleaved text embeddings and image features
             cur_input_embeds = []
             cur_labels = []
             for i, (ids_chunk, labels_chunk) in enumerate(zip(cur_input_ids_chunks, cur_labels_chunks)):
