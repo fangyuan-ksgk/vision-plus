@@ -6,7 +6,7 @@ import torch.nn as nn
 from multimodal_encoder.builder import build_vision_tower
 from multimodal_resampler.builder import build_vision_resampler
 from multimodal_projector.builder import build_vision_projector
-from constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX
+from constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 
 class LlavaMetaModel(nn.Module):
     def __init__(self, config):
@@ -106,26 +106,32 @@ class LlavaMetaForCausalLM(ABC):
         return image_feature 
     
     def encode_images(self, images): # Should work for list of images here (!)
+        """ 
+        images: [num_images, C, H, W]
+        """
         image_features = self.get_model().get_vision_tower()(images)
         image_features = self.get_model().mm_projector(image_features)
-        image_features = [self.add_token_per_frame(image_feature) for image_feature in image_features]
-        return image_features
+        # image_features = [self.add_token_per_frame(image_feature) for image_feature in image_features]
+        
+        return image_features # [num_images, num_patches, feature_dim]
+    
     
     def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images):
         """ 
-        Logic: 
-        Process images into embedding vectors, then slot them into input_embedding sequence together with the text embeddings, with padding on the maximal sequence length
-        Quite importantly, the input_ids need to specify where the image is in the sequence by using IMAGE_TOKEN_INDEX value
-        Questions: 
-        - Where does the input_ids gets processed, meaning the insertion of IMAGE_TOKEN_INDEX values
-        - 2 Values are not used here: position_ids, past_key_values, why we need them?
+        Interleave Image features with Text features and construct input sequence embeddings
+        Images: [batch_size, num_images, C, H, W] (Assuming multiple images per sample)
+        Input_ids represent image with IMAGE_TOKEN_INDEX, which is converted into num_patches tokens
+        Labels, Input_ids, attention_mask are updated accordingly, padding is also applied here
+        -------------------
+        Error Report when number of IMAGE_TOKEN_INDEX in input_ids does not match number of images
         """
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
 
-        # Encode images | original implementation concatenate all images along row axis, and split the resulting features | should be included into .encode_images function really
-        image_features = self.encode_images(images)
+        # Encode all images
+        batch_size, num_images, C, H, W = images.shape
+        image_features = self.encode_images(images.view(-1, C, H, W)).view(batch_size, num_images, -1, self.config.hidden_size)
 
         # Process input ids and labels
         input_ids = [ids[mask] for ids, mask in zip(input_ids, attention_mask)]
@@ -134,7 +140,9 @@ class LlavaMetaForCausalLM(ABC):
         new_input_embeds = []
         new_labels = []
         for batch_idx, cur_input_ids in enumerate(input_ids):
-            num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum() # Somehow all the IMAGE TOKEN are set to be a specific value | Embedding is also done through the vision encoder
+            num_images_in_sequence = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
+            assert num_images_in_sequence == num_images, f"Mismatch in number of images in input_ids and images: {num_images_in_sequence} vs {num_images}"
+
             if num_images == 0:
                 cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)
                 new_input_embeds.append(cur_input_embeds)
@@ -143,12 +151,8 @@ class LlavaMetaForCausalLM(ABC):
 
             # Split input ids and labels at image tokens
             split_indices = [-1] + torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [cur_input_ids.shape[0]]
-            cur_input_ids_chunks = []
-            cur_labels_chunks = []
-            for i in range(len(split_indices)-1):
-                if split_indices[i+1] - split_indices[i] > 1:
-                    cur_input_ids_chunks.append(cur_input_ids[split_indices[i]+1:split_indices[i+1]])
-                    cur_labels_chunks.append(labels[batch_idx][split_indices[i]+1:split_indices[i+1]])
+            cur_input_ids_chunks = [cur_input_ids[split_indices[i]+1:split_indices[i+1]] for i in range(len(split_indices)-1) if split_indices[i+1] - split_indices[i] > 1]
+            cur_labels_chunks = [labels[batch_idx][split_indices[i]+1:split_indices[i+1]] for i in range(len(split_indices)-1) if split_indices[i+1] - split_indices[i] > 1]
 
             # Interleave text embeddings and image features
             cur_input_embeds = []
@@ -157,15 +161,14 @@ class LlavaMetaForCausalLM(ABC):
                 cur_input_embeds.append(self.get_model().embed_tokens(ids_chunk))
                 cur_labels.append(labels_chunk)
                 if i < num_images:
-                    cur_input_embeds.append(image_features[batch_idx])
-                    cur_labels.append(torch.full((image_features[batch_idx].shape[0],), IGNORE_INDEX, device=labels_chunk.device, dtype=labels_chunk.dtype))
-
+                    cur_input_embeds.append(image_features[batch_idx, i])
+                    cur_labels.append(torch.full((image_features[batch_idx, i].shape[0],), IGNORE_INDEX, device=labels_chunk.device, dtype=labels_chunk.dtype))
+                        
             new_input_embeds.append(torch.cat(cur_input_embeds))
             new_labels.append(torch.cat(cur_labels))
 
         # Pad sequences to max length
         max_len = max(x.shape[0] for x in new_input_embeds)
-        batch_size = len(new_input_embeds)
         new_input_embeds_padded = []
         new_labels_padded = torch.full((batch_size, max_len), IGNORE_INDEX, dtype=new_labels[0].dtype, device=new_labels[0].device)
         attention_mask = torch.zeros((batch_size, max_len), dtype=torch.bool, device=new_labels[0].device)
@@ -176,8 +179,59 @@ class LlavaMetaForCausalLM(ABC):
             new_labels_padded[i, :cur_len] = cur_labels
             attention_mask[i, :cur_len] = True
 
-        new_input_embeds = torch.stack(new_input_embeds_padded) # [batch_size, max_len, feature_dim]
+        new_input_embeds = torch.stack(new_input_embeds_padded)
 
         return None, None, attention_mask, past_key_values, new_input_embeds, new_labels_padded
         
-          
+        
+    def initialize_vision_tokenizer(self, model_args, tokenizer):
+        """ 
+        Likely redundant implementation. 
+        Attemps to add special tokens for image-start, image-end, image-patch input ids
+        The weird part is that we do NOT wish to generate image, therefore updating output embedding is meaningless, making tokenizer update redundant
+        Fine-tuning the input embedding might be helpful with the extra tokens, we need to however fix the output embedding
+        :: Compared to having extra 'image_end' learnable embedding (image_newline), this seems to be a more elegant solution, albert introducing more training paramters (all the token embedding matrix)
+        Neverthless, this is good sport
+        """
+        new_tokens = []
+        
+        if model_args.mm_use_im_patch_token:
+            new_tokens.append(DEFAULT_IMAGE_PATCH_TOKEN)
+        
+        if model_args.mm_use_im_start_end:
+            new_tokens.extend([DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN])
+        
+        if new_tokens:
+            num_new_tokens = tokenizer.add_tokens(new_tokens, special_tokens=True)
+            self.resize_token_embeddings(len(tokenizer))
+            
+            if num_new_tokens > 0:
+                input_embeddings = self.get_input_embeddings().weight.data
+                output_embeddings = self.get_output_embeddings().weight.data
+                
+                input_embeddings_avg = input_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True) # keepdim for broadcasting
+                output_embeddings_avg = output_embeddings[:-num_new_tokens].mean(dim=0, keepdim=True)
+                
+                input_embeddings[-num_new_tokens:] = input_embeddings_avg
+                output_embeddings[-num_new_tokens:] = output_embeddings_avg
+        
+        if model_args.tune_mm_mlp_adapter:
+            for p in self.get_input_embeddings().parameters():
+                p.requires_grad = True
+            for p in self.get_output_embeddings().parameters():
+                p.requires_grad = False
+        
+        if model_args.pretrain_mm_mlp_adapter:
+            self._load_pretrained_weights(model_args, num_new_tokens)
+
+    def _load_pretrained_weights(self, model_args, num_new_tokens):
+        mm_projector_weights = torch.load(model_args.pretrain_mm_mlp_adapter, map_location="cpu")
+        embed_tokens_weight = mm_projector_weights["model.embed_tokens.weight"]
+        input_embeddings = self.get_input_embeddings().weight.data
+        
+        if input_embeddings.shape == embed_tokens_weight.shape:
+            input_embeddings[-num_new_tokens:] = embed_tokens_weight[-num_new_tokens:]
+        elif embed_tokens_weight.shape[0] == num_new_tokens:
+            input_embeddings[-num_new_tokens:] = embed_tokens_weight
+        else:
+            raise ValueError(f"Unexpected embed_tokens_weight shape. Pretrained: {embed_tokens_weight.shape}. Current: {input_embeddings.shape}. Number of new tokens: {num_new_tokens}.")
