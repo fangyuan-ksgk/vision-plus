@@ -124,6 +124,8 @@ class LlavaMetaForCausalLM(ABC):
         Labels, Input_ids, attention_mask are updated accordingly, padding is also applied here
         --------------------------------------------------------------------------------------------
         Error Report when number of IMAGE_TOKEN_INDEX in input_ids does not match number of images
+
+        Wierd: Position_ids & Past_key_values never used in calculation
         """
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:

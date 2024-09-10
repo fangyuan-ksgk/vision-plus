@@ -26,30 +26,29 @@ class LlavaConfig(LlamaConfig):
     # rope_scaling: Optional[dict] = {}
 
 
-class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
+class LlavaLlamaModel(LlavaMetaModel, LlamaModel): # ordered inheritance with subsumtion structure
     config_class = LlavaConfig
 
     def __init__(self, config: LlamaConfig):
-        super(LlavaLlamaModel, self).__init__(config)
+        super(LlavaLlamaModel, self).__init__(config) # calling LlavaMetaModel's init function, this is what 'super' does
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
-
+    
     def __init__(self, config):
         LlamaForCausalLM.__init__(self, config)
-
-        # configure default generation settings
+        
         config.model_type = "llava_llama"
-        # config.rope_scaling = None
-
+        
         self.model = LlavaLlamaModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        # Initialize weights and apply final processing
+        # Initalize weight and apply final processing
         self.post_init()
-
+        
     def get_model(self):
-        return self.model
+        return self.model 
+
 
     def forward(
         self,
@@ -69,6 +68,14 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         dpo_forward: Optional[bool] = None,
         cache_position=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
+        """ 
+        Intuition: 
+        1. We explicitly preprocess sequence input embeddings instead of using input_ids, given the extra modality
+        2. For 'dpo' or 'sft', the propagation differs in whether we calculate the CELoss within the forward function.
+        - for DPO, we don't calculate CELoss by not including 'labels' in the forward function computation
+        - for SFT, we propagate LlamaModel forward function with 'labels' included
+        So DPO's loss is not CELoss (simPO has CELoss as one of its component, but calculating them outside the forward function should be the norm)
+        """
 
         if inputs_embeds is None:
             (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes)
