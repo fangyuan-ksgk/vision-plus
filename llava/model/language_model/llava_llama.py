@@ -124,7 +124,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         position_ids = kwargs.pop("position_ids", None)
         attention_mask = kwargs.pop("attention_mask", None)
         if "inputs_embeds" in kwargs:
-            raise NotImplementedError("`inputs_embeds` is not supported")
+            raise NotImplementedError("`inputs_embeds` is not supported for generation method.")
 
         if images is not None:
             (inputs, position_ids, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_multimodal(inputs, position_ids, attention_mask, None, None, images, modalities, image_sizes=image_sizes)
@@ -134,6 +134,12 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         return super().generate(position_ids=position_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds, **kwargs)
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
+        """ 
+        Malfunctioning .... or at least incomplete preparation function ...
+        I guess this function also assumes input_ids are already interleaving text & image tokens
+        Then it forms a dictionary with: input_ids, attention_mask, images, image_sizes, etc. 
+        Note that vision encoding is by no way completed with this function ....
+        """
         images = kwargs.pop("images", None)
         image_sizes = kwargs.pop("image_sizes", None)
         inputs = super().prepare_inputs_for_generation(input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs)
