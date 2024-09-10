@@ -8,10 +8,9 @@ from multimodal_resampler.builder import build_vision_resampler
 from multimodal_projector.builder import build_vision_projector
 from constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 
-class LlavaMetaModel(nn.Module):
+class LlavaMetaModel:
     def __init__(self, config):
-        super(LlavaMetaModel, self).__init__()
-        
+
         if hasattr(config, "mm_vision_tower"):
             self.vision_tower = build_vision_tower(config, delay_load=getattr(config, "delay_load", False))
             self.vision_resampler = build_vision_resampler(config, vision_tower=self.vision_tower)
