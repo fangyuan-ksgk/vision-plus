@@ -25,6 +25,17 @@ class LlavaConfig(LlamaConfig):
     do_sample: bool = False
     top_p: Optional[float] = None
     vision_tower: Optional[str] = None
+
+    model_name_or_path: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    mm_vision_tower: str = "openai/clip-vit-base-patch32"
+    mm_vision_select_feature: str = "patch"
+    mm_vision_select_layer: int = -1
+    mm_hidden_size: int = 768  # this one match the pre-trained vision encoder
+    use_im_start_end: bool = False
+    use_im_patch_token: bool = True
+    delay_load: bool = True
+    mm_resampler_type: Optional[str] = None
+    hidden_size: int = 768  # This one should match with the language model
     # rope_scaling: Optional[dict] = {}
 
 
@@ -88,7 +99,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         
     def get_model(self):
         return self.model 
-
 
     def forward(
         self,
