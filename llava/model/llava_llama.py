@@ -49,10 +49,9 @@ class LlavaLlamaModel(LlamaModel): # Remove LlavaMetaModel to reduce the trouble
     def initialize_vision_modules(self, model_args):
         # Update config with vision-related parameters
         self.config.mm_vision_tower = model_args.mm_vision_tower
-        self.config.mm_hidden_size = self.vision_resampler.hidden_size
+        self.config.mm_hidden_size = self.vision_resampler.mm_hidden_size
         self.config.mm_vision_select_layer = model_args.mm_vision_select_layer
         self.config.mm_vision_select_feature = model_args.mm_vision_select_feature
-        self.config.mm_patch_merge_type = model_args.mm_patch_merge_type
 
         # Load vision tower if not already loaded
         if self.vision_tower is None:
@@ -68,10 +67,6 @@ class LlavaLlamaModel(LlamaModel): # Remove LlavaMetaModel to reduce the trouble
         # Initialize mm_projector if not already present
         if not hasattr(self, "mm_projector"):
             self.mm_projector = build_vision_projector(self.config, vision_cfg=self.vision_tower.config)
-
-        # Add image_newline parameter if required
-        if "unpad" in self.config.mm_patch_merge_type and not hasattr(self, "image_newline"):
-            self.image_newline = nn.Parameter(torch.randn(self.config.hidden_size) / (self.config.hidden_size ** 0.5))
 
         # Ensure gradients are enabled for mm_projector
         for p in self.mm_projector.parameters():
