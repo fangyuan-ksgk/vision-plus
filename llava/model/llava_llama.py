@@ -24,6 +24,7 @@ class LlavaConfig(LlamaConfig):
     max_new_tokens: int = 1024
     do_sample: bool = False
     top_p: Optional[float] = None
+    vision_tower: Optional[str] = None
     # rope_scaling: Optional[dict] = {}
 
 
@@ -47,7 +48,7 @@ class LlavaLlamaModel(LlamaModel): # Remove LlavaMetaModel to reduce the trouble
 
     def initialize_vision_modules(self, model_args):
         # Update config with vision-related parameters
-        self.config.mm_vision_tower = model_args.vision_tower
+        self.config.mm_vision_tower = model_args.mm_vision_tower
         self.config.mm_hidden_size = self.vision_resampler.hidden_size
         self.config.mm_vision_select_layer = model_args.mm_vision_select_layer
         self.config.mm_vision_select_feature = model_args.mm_vision_select_feature
