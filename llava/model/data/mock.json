@@ -1,7 +1,7 @@
 [
     {
       "id": "image_1",
-      "image": "img.jpg",
+      "image": "nishino.jpg",
       "conversations": [
         {
           "from": "human",
@@ -23,7 +23,7 @@
     },
     {
       "id": "video_1",
-      "video": "vid.mp4",
+      "video": "nishino-animate.mp4",
       "conversations": [
         {
           "from": "human",

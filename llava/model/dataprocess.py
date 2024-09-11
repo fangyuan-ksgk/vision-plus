@@ -112,7 +112,6 @@ def preprocess_llama3(
     
 def process_video_with_pyav(video_file, data_args):
     container = av.open(video_file)
-    # !!! This is the only difference. Using auto threading
     container.streams.video[0].thread_type = "AUTO"
 
     video_frames = []
@@ -120,19 +119,25 @@ def process_video_with_pyav(video_file, data_args):
         if packet.stream.type == 'video':
             for frame in packet.decode():
                 video_frames.append(frame)
+                
+    # Subsample frames according to desired fps (assuming desired fps is smaller than actual fps)
     total_frame_num = len(video_frames)
     video_time = video_frames[-1].time
-    avg_fps = round(total_frame_num / video_time / data_args.video_fps)
-    frame_idx = [i for i in range(0, total_frame_num, avg_fps)]
+    fps = total_frame_num / video_time
+    sampling_interval = round(fps / data_args.video_fps)
+    frame_idx = list(range(0, total_frame_num, sampling_interval))
 
-    if data_args.frames_upbound > 0:
+    if data_args.frames_upbound > 0: # additional subsampling based on interpolation
         if len(frame_idx) > data_args.frames_upbound:
             uniform_sampled_frames = np.linspace(0, total_frame_num - 1, data_args.frames_upbound, dtype=int)
             frame_idx = uniform_sampled_frames.tolist()
 
-
+    num_frames_to_sample = len(frame_idx)
     frames = [video_frames[i] for i in frame_idx]
-    return np.stack([x.to_ndarray(format="rgb24") for x in frames])
+    video = np.stack([x.to_ndarray(format="rgb24") for x in frames])
+    frame_time = [frame.time for frame in frames]
+    
+    return video, video_time, frame_time, num_frames_to_sample
 
     
 class LazySupervisedDataset(Dataset):
@@ -198,7 +203,7 @@ class LazySupervisedDataset(Dataset):
             video_path = os.path.join(video_folder, video_file)
             if not os.path.exists(video_path):
                 print(f"File {video_path} does not exist!")
-                return self._get_item(i + 1)
+                return self.__getitem__(i + 1)
 
             try:
                 # Check if it's a directory of frames or a video file
@@ -226,11 +231,10 @@ class LazySupervisedDataset(Dataset):
                 else:
                     video, video_time, frame_time, num_frames_to_sample = process_video_with_pyav(video_path, self.data_args)
 
-                processor = self.data_args.image_processor
+                processor = self.image_processor
                 image = processor.preprocess(video, return_tensors="pt")["pixel_values"]
                 
-                # Use multiple DEFAULT_IMAGE_TOKENs for video
-                video_tokens = DEFAULT_IMAGE_TOKEN * num_frames_to_sample
+                video_tokens = DEFAULT_IMAGE_TOKEN * num_frames_to_sample # video convert to multiple frames represented by multiple image tokens
                 
                 frame_time_str = ",".join([f"{t:.2f}s" for t in frame_time])
                 
@@ -245,7 +249,7 @@ class LazySupervisedDataset(Dataset):
             except Exception as e:
                 print(f"Error: {e}")
                 print(f"Failed to read video file: {video_path}")
-                return self._get_item(i + 1)
+                return self.__getitem__(i + 1)
         else:
             conversations = copy.deepcopy([source["conversations"]])
 
