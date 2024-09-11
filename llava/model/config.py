@@ -1,10 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
-
-from dataclasses import dataclass, field
-from typing import Optional
-
 @dataclass
 class ModelArguments:
     model_name_or_path: str = field(default="facebook/opt-125m")
@@ -22,3 +18,15 @@ class ModelArguments:
     mm_resampler_type: Optional[str] = field(default=None)
     
     hidden_size: int = field(default=768) # This one should match with the language model
+
+
+@dataclass
+class DataArguments:
+    data_path: str = field(default=None, metadata={"help": "Path to the training data, in llava's instruction.json format."})
+    image_folder: Optional[str] = field(default=None)
+    video_folder: Optional[str] = field(default=None)
+    video_fps: int = field(default=1)
+    frames_upbound: int = field(default=0)
+    add_time_instruction: bool = field(default=False)
+    force_sample: bool = field(default=False)
+    default_fps: int = field(default=10)  # Added based on usage in LazySupervisedDataset

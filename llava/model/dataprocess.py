@@ -81,7 +81,7 @@ def preprocess_llama3(
                 input_id += encode_id 
                 target += [IGNORE_INDEX] * len(encode_id)
             elif role == "assistant":
-                mask_seq, target_seq = tokenizer.apply_chat_template(conv, tokenize=False)
+                mask_seq, target_seq = tokenizer.apply_chat_template(conv, tokenize=False).split(content)
                 mask_tokens = tokenizer.encode(mask_seq)[1:] # remove BOS token
                 target_tokens = tokenizer.encode(target_seq)
                 
@@ -135,14 +135,12 @@ def process_video_with_pyav(video_file, data_args):
     return np.stack([x.to_ndarray(format="rgb24") for x in frames])
 
     
-    
 class LazySupervisedDataset(Dataset):
-    def __init__(self, data_path, tokenizer, image_processor, image_folder, video_folder):
+    def __init__(self, data_args, tokenizer, image_processor):
         self.tokenizer = tokenizer
         self.image_processor = image_processor
-        self.image_folder = image_folder
-        self.video_folder = video_folder
-        self.data = self.load_data(data_path)
+        self.data_args = data_args
+        self.data = self.load_data(data_args.data_path)
 
     def load_data(self, data_path):
         """ 
@@ -180,16 +178,16 @@ class LazySupervisedDataset(Dataset):
         container.close()
         return torch.stack(frames)
     
-    def _get_item(self, i) -> Dict[str, torch.Tensor]:
+    def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         """ 
         Lazy means process data when it's loaded | extra latency when first loaded, but faster for subsequent access
         """
-        source = self.list_data_dict[i]
+        source = self.data[i]
         
         if "image" in source:
             image_file = source["image"]
             image_folder = self.data_args.image_folder
-            processor = self.data_args.image_processor
+            processor = self.image_processor
             image = Image.open(os.path.join(image_folder, image_file)).convert('RGB')
             image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
             conversations = copy.deepcopy([source["conversations"]])
@@ -244,7 +242,6 @@ class LazySupervisedDataset(Dataset):
 
                 image = [(image, video[0].size, "video")]
                 conversations = copy.deepcopy([source["conversations"]])
-
             except Exception as e:
                 print(f"Error: {e}")
                 print(f"Failed to read video file: {video_path}")
@@ -253,7 +250,7 @@ class LazySupervisedDataset(Dataset):
             conversations = copy.deepcopy([source["conversations"]])
 
         # Process the conversations and create the data dictionary
-        data_dict = preprocess_llama3(conversations, self.tokenizer, has_image="image" in source or "video" in source)
+        data_dict = preprocess_llama3(conversations, self.tokenizer)
         
         if isinstance(i, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
