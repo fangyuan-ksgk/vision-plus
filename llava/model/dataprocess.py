@@ -11,18 +11,9 @@ import numpy as np
 # -- Then, we should expand it to tokenizer.encode(DEFAULT_IM_START_TOKEN) + IMAGE_EMBEDDINGs + tokenizer.encode(DEFAULT_IM_END_TOKEN) with updated tokenizer
 # -- In this data processing pipeline, we did not update the tokenizer, therefore DEFAULT_IM_START_TOKEN & DEFAULT_IM_END_TOKEN should NOT BE INCLUDED !
 
-# def preprocess_multimodal(sources: Sequence[str]) -> Dict:
-#     # Preprocess input sequence
-#     # One IMAGE_TOKEN corresponds to one image
-#     for source in sources:
-#         for sentence in source:
-#             replace_token = DEFAULT_IMAGE_TOKEN
-#             sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, replace_token)
-#     return sources
-
 
 def preprocess_llama3(
-    sources,
+    conversations,
     tokenizer: transformers.PreTrainedTokenizer,
     default_system_message: str = "You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language.",
 ) -> Dict:
@@ -43,52 +34,45 @@ def preprocess_llama3(
 
     input_ids, targets = [], []
     
-    for source in sources:
+    
+    system_message = default_system_message
+    for conv in conversations:
+        role = conv.get("role") or conv.get("from")
+        if role == "system":
+            system_message = conv.get("content") or conv.get("value")
+            break
         
-        # Extract system message
-        system_message = None
-        for conv in source:
-            role = conv.get("role") or conv.get("from")
-            if role == "system":
-                system_message = conv.get("content") or conv.get("value")
-                break
-                        
-        if system_message is None:
-            system_message = default_system_message
-                
-        if source[0]["from"] != "human":
-            source = source[1:]
-
-        input_id, target = [], []
-
-        input_id += tokenizer.apply_chat_template([{"role" : "system", "content" : system_message}]) # Begin with system message
-        target += [IGNORE_INDEX] * len(input_id) # mask out tokens with IGNORE_INDEX
-
-        for conv in source:
-            try:
-                role = conv["role"]
-                content = conv["content"]
-            except:
-                role = conv["from"]
-                content = conv["value"]
-
-            role =  roles.get(role, role) # map towards "user" and "assistant"
+    
+    input_id, target = [], []
+    input_id += tokenizer.apply_chat_template([{"role" : "system", "content" : system_message}]) # Begin with system message
+    target += [IGNORE_INDEX] * len(input_id) # mask out tokens with IGNORE_INDEX
+    
+    for conv in conversations:
+        try: 
+            role = conv["role"]
+            content = conv["content"]
+        except: 
+            role = conv["from"]
+            content = conv["value"]
+        
+        role = roles.get(role, role) # map towards "user" and "assistant"
+        
+        conv = [{"role" : role, "content" : content}]
+        
+        if role == "user":
+            encode_id = tokenizer.apply_chat_template(conv)[1:]
+            input_id += encode_id 
+            target += [IGNORE_INDEX] * len(encode_id)
+        elif role == "assistant":
+            mask_seq, target_seq = tokenizer.apply_chat_template(conv, tokenize=False).split(content)
+            target_seq = content + target_seq
+            mask_tokens = tokenizer.encode(mask_seq)[1:] # remove BOS token
+            target_tokens = tokenizer.encode(target_seq)
             
-            conv = [{"role" : role, "content" : content}]
-            
-            if role == "user":
-                encode_id = tokenizer.apply_chat_template(conv)[1:]
-                input_id += encode_id 
-                target += [IGNORE_INDEX] * len(encode_id)
-            elif role == "assistant":
-                mask_seq, target_seq = tokenizer.apply_chat_template(conv, tokenize=False).split(content)
-                mask_tokens = tokenizer.encode(mask_seq)[1:] # remove BOS token
-                target_tokens = tokenizer.encode(target_seq)
-                
-                input_id += mask_tokens + target_tokens
-                target += [IGNORE_INDEX] * len(mask_tokens) + target_tokens
-            else:
-                continue # skip over 'system' message
+            input_id += mask_tokens + target_tokens
+            target += [IGNORE_INDEX] * len(mask_tokens) + target_tokens
+        else:
+            continue # skip over 'system' message
                     
         assert len(input_id) == len(target), f"{len(input_id)} != {len(target)}"
         
@@ -141,6 +125,7 @@ def process_video_with_pyav(video_file, data_args):
 
     
 class LazySupervisedDataset(Dataset):
+    
     def __init__(self, data_args, tokenizer, image_processor):
         self.tokenizer = tokenizer
         self.image_processor = image_processor
@@ -166,102 +151,65 @@ class LazySupervisedDataset(Dataset):
         image = Image.open(image_path).convert("RGB")
         return self.image_processor(images=image, return_tensors="pt")["pixel_values"][0]
 
-    def process_video(self, video_path, num_frames=10):
-        container = av.open(video_path)
-        video = container.streams.video[0]
-        total_frames = video.frames
-        indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+    def process_video(self, video_path):
         
-        frames = []
-        for i, frame in enumerate(container.decode(video=0)):
-            if i in indices:
-                img = frame.to_image()
-                frames.append(self.image_processor(images=img, return_tensors="pt")["pixel_values"][0])
-            if len(frames) == num_frames:
-                break
-
-        container.close()
-        return torch.stack(frames)
+        if not os.path.exists(video_path):
+            raise FileNotFoundError(f"Video file {video_path} does not exist!")
+        
+        if os.path.isdir(video_path): # Path is a directory saving frames separately
+            frame_files = [os.path.join(video_path, f) for f in os.listdir(video_path) if os.path.isfile(os.path.join(video_path, f))]
+            frame_files.sort()
+            
+            num_frames_to_sample = self.data_args.frames_upbound if self.data_args.force_sample else 10
+            total_frames = len(frame_files)
+            sampled_indices = np.linspace(0, total_frames - 1, num_frames_to_sample, dtype=int)
+            
+            video = []
+            for idx in sampled_indices:
+                frame_path = frame_files[idx]
+                try:
+                    with Image.open(frame_path) as img:
+                        frame = img.convert("RGB")
+                        video.append(frame)
+                except IOError:
+                    print(f"Failed to read frame at path: {frame_path}")
+            
+            avg_fps = self.data_args.default_fps  # Use a default FPS or get from data_args
+            video_time = total_frames / avg_fps
+            frame_time = [i/avg_fps for i in sampled_indices]
+        else:
+            video, video_time, frame_time, num_frames_to_sample = process_video_with_pyav(video_path, self.data_args)
+    
+        return video, video_time, frame_time, num_frames_to_sample
     
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         """ 
-        Lazy means process data when it's loaded | extra latency when first loaded, but faster for subsequent access
+        Interleaved text, image, video
         """
         source = self.data[i]
-        
-        if "image" in source:
-            image_file = source["image"]
-            image_folder = self.data_args.image_folder
-            processor = self.image_processor
-            image = Image.open(os.path.join(image_folder, image_file)).convert('RGB')
-            image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-            conversations = copy.deepcopy([source["conversations"]])
-       
-        elif "video" in source:
-            video_file = source["video"]
-            video_folder = self.data_args.video_folder
-            video_path = os.path.join(video_folder, video_file)
-            if not os.path.exists(video_path):
-                print(f"File {video_path} does not exist!")
-                return self.__getitem__(i + 1)
+        conversations = copy.deepcopy(source["conversations"])
+        images = []
 
-            try:
-                # Check if it's a directory of frames or a video file
-                if os.path.isdir(video_path):
-                    frame_files = [os.path.join(video_path, f) for f in os.listdir(video_path) if os.path.isfile(os.path.join(video_path, f))]
-                    frame_files.sort()
-                    
-                    num_frames_to_sample = self.data_args.frames_upbound if self.data_args.force_sample else 10
-                    total_frames = len(frame_files)
-                    sampled_indices = np.linspace(0, total_frames - 1, num_frames_to_sample, dtype=int)
-                    
-                    video = []
-                    for idx in sampled_indices:
-                        frame_path = frame_files[idx]
-                        try:
-                            with Image.open(frame_path) as img:
-                                frame = img.convert("RGB")
-                                video.append(frame)
-                        except IOError:
-                            print(f"Failed to read frame at path: {frame_path}")
-                    
-                    avg_fps = self.data_args.default_fps  # Use a default FPS or get from data_args
-                    video_time = total_frames / avg_fps
-                    frame_time = [i/avg_fps for i in sampled_indices]
-                else:
-                    video, video_time, frame_time, num_frames_to_sample = process_video_with_pyav(video_path, self.data_args)
-
-                processor = self.image_processor
-                image = processor.preprocess(video, return_tensors="pt")["pixel_values"]
+        if "media" in source:
+            for media_file in source["media"]:
+                if "image" in media_file:
+                    image = self.process_image(os.path.join(self.data_args.image_folder, media_file["image"]))
+                    images.append((image, image.size, "image"))
+                elif "video" in media_file:
+                    video, _, _, _ = self.process_video(os.path.join(self.data_args.video_folder, media_file["video"]))
+                    processor = self.image_processor 
+                    video_frames = processor.preprocess(video, return_tensors="pt")["pixel_values"]
+                    images.append((video_frames, video[0].size, "video"))
                 
-                video_tokens = DEFAULT_IMAGE_TOKEN * num_frames_to_sample # video convert to multiple frames represented by multiple image tokens
-                
-                frame_time_str = ",".join([f"{t:.2f}s" for t in frame_time])
-                
-                if self.data_args.add_time_instruction:
-                    time_instruction = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time_str}. Please answer the following questions related to this video."
-                    source["conversations"][0]["value"] = f'{video_tokens}\n{time_instruction}\n{source["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
-                else:
-                    source["conversations"][0]["value"] = f'{video_tokens}\n{source["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
-
-                image = [(image, video[0].size, "video")]
-                conversations = copy.deepcopy([source["conversations"]])
-            except Exception as e:
-                print(f"Error: {e}")
-                print(f"Failed to read video file: {video_path}")
-                return self.__getitem__(i + 1)
-        else:
-            conversations = copy.deepcopy([source["conversations"]])
-
         # Process the conversations and create the data dictionary
         data_dict = preprocess_llama3(conversations, self.tokenizer)
         
         if isinstance(i, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
 
-        # Add image or video data if present
-        if "image" in source or "video" in source:
-            data_dict["image"] = image
+        # Add image or video data if present | Unite video & image
+        if images:
+            data_dict["image"] = images
 
         data_dict["id"] = source.get("id", i)
 
