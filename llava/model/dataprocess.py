@@ -1,23 +1,24 @@
 import transformers 
 from typing import Dict, Sequence
 import copy, torch, json, os, av
-from constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_END_TOKEN, DEFAULT_IM_START_TOKEN
+from constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
 from PIL import Image
 from torch.utils.data import Dataset 
 import numpy as np
 
+# Question: It's important to note the flow of special token <image>, IMAGE_TOKEN_INDEX, as well as the DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
+# -- Before the tokenizer is updated with these special tokens (IMAGE_TOKEN_INDEX, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN) we should only include place-holder IMAGE_TOKEN_INDEX input the input_ids
+# -- Then, we should expand it to tokenizer.encode(DEFAULT_IM_START_TOKEN) + IMAGE_EMBEDDINGs + tokenizer.encode(DEFAULT_IM_END_TOKEN) with updated tokenizer
+# -- In this data processing pipeline, we did not update the tokenizer, therefore DEFAULT_IM_START_TOKEN & DEFAULT_IM_END_TOKEN should NOT BE INCLUDED !
 
-def preprocess_multimodal(sources: Sequence[str], use_im_start_end: bool = True) -> Dict:
-    # Preprocess input sequence
-    # DEFAULT_IMAGE_TOKEN --> DEFAULT_IM_START_TOKEN + DEFAULT_IMAGE_TOKEN + DEFAULT_IM_END_TOKEN
-    for source in sources:
-        for sentence in source:
-            replace_token = DEFAULT_IMAGE_TOKEN
-            if use_im_start_end:
-                replace_token = DEFAULT_IM_START_TOKEN + replace_token + DEFAULT_IM_END_TOKEN
-
-            sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, replace_token)
-    return sources
+# def preprocess_multimodal(sources: Sequence[str]) -> Dict:
+#     # Preprocess input sequence
+#     # One IMAGE_TOKEN corresponds to one image
+#     for source in sources:
+#         for sentence in source:
+#             replace_token = DEFAULT_IMAGE_TOKEN
+#             sentence["value"] = sentence["value"].replace(DEFAULT_IMAGE_TOKEN, replace_token)
+#     return sources
 
 
 def preprocess_llama3(
@@ -180,6 +181,9 @@ class LazySupervisedDataset(Dataset):
         return torch.stack(frames)
     
     def _get_item(self, i) -> Dict[str, torch.Tensor]:
+        """ 
+        Lazy means process data when it's loaded | extra latency when first loaded, but faster for subsequent access
+        """
         source = self.list_data_dict[i]
         
         if "image" in source:
@@ -188,9 +192,8 @@ class LazySupervisedDataset(Dataset):
             processor = self.data_args.image_processor
             image = Image.open(os.path.join(image_folder, image_file)).convert('RGB')
             image = processor.preprocess(image, return_tensors="pt")["pixel_values"][0]
-            conversations = preprocess_multimodal(
-                copy.deepcopy([source["conversations"]]), self.data_args
-            )
+            conversations = copy.deepcopy([source["conversations"]])
+       
         elif "video" in source:
             video_file = source["video"]
             video_folder = self.data_args.video_folder
@@ -240,7 +243,8 @@ class LazySupervisedDataset(Dataset):
                     source["conversations"][0]["value"] = f'{video_tokens}\n{source["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
 
                 image = [(image, video[0].size, "video")]
-                conversations = preprocess_multimodal(copy.deepcopy([source["conversations"]]), self.data_args)
+                conversations = copy.deepcopy([source["conversations"]])
+
             except Exception as e:
                 print(f"Error: {e}")
                 print(f"Failed to read video file: {video_path}")
