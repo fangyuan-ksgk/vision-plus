@@ -23,52 +23,47 @@ def preprocess_multimodal(sources: Sequence[str], use_im_start_end: bool = True)
 def preprocess_llama3(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
-    has_image: bool = False,
-    max_len=2048,
-    system_message: str = "You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language.",
+    default_system_message: str = "You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language.",
 ) -> Dict:
-    # roles = {"human": "<|start_header_id|>user<|end_header_id|>", "gpt": "<|start_header_id|>assistant<|end_header_id|>"}
+    """ 
+    Note that truncation is not done here, it could remove the EOS token, so it's probably more ideal to do it before this function.
+    Prepare input_ids & targets for the model after applying chat template. 
+    - convert <image> to IMAGE_TOKEN_INDEX and make sure targets are correct
+    """
+    
     roles = {"human": "user", "gpt": "assistant"}
 
-    # Add image tokens to tokenizer as a special tokens
-    # Use a deepcopy of tokenizer so that we don't modify on the tokenizer
-    tokenizer = copy.deepcopy(tokenizer)
-    # When there is actually an image, we add the image tokens as a special token
-    if has_image:
-        tokenizer.add_tokens(["<image>"], special_tokens=True)
+    tokenizer = copy.deepcopy(tokenizer) # deepcopy to avoid modification of tokenzier (the '<image>' is a placeholder, not included in actual input_ids)
+    tokenizer.add_tokens(["<image>"], special_tokens=True)
     image_token_index = tokenizer.convert_tokens_to_ids("<image>")
-    bos_token_id = tokenizer.convert_tokens_to_ids("<|begin_of_text|>")
-    start_header_id = tokenizer.convert_tokens_to_ids("<|start_header_id|>")
-    end_header_id = tokenizer.convert_tokens_to_ids("<|end_header_id|>")
-    eot_id = tokenizer.convert_tokens_to_ids("<|eot_id|>")
 
     unmask_tokens = ["<|begin_of_text|>", "<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>", "\n\n"]
     unmask_tokens_idx = [tokenizer.convert_tokens_to_ids(tok) for tok in unmask_tokens]
 
-    # After update, calling tokenizer of llama3 will
-    # auto add bos id for the tokens. ヽ(｀⌒´)ﾉ
-    def safe_tokenizer_llama3(text):
-        input_ids = tokenizer(text).input_ids
-        if input_ids[0] == bos_token_id:
-            input_ids = input_ids[1:]
-        return input_ids
-
-    nl_tokens = tokenizer.convert_tokens_to_ids("\n\n")
-    # Apply prompt templates
     input_ids, targets = [], []
-    for i, source in enumerate(sources):
-        if roles[source[0]["from"]] != roles["human"]:
+    
+    for source in sources:
+        
+        # Extract system message
+        system_message = None
+        for conv in source:
+            role = conv.get("role") or conv.get("from")
+            if role == "system":
+                system_message = conv.get("content") or conv.get("value")
+                break
+                        
+        if system_message is None:
+            system_message = default_system_message
+                
+        if source[0]["from"] != "human":
             source = source[1:]
 
         input_id, target = [], []
 
-        # New version, use apply chat template
-        # Build system message for each sentence
-        input_id += tokenizer.apply_chat_template([{"role" : "system", "content" : system_message}])
-        target += [IGNORE_INDEX] * len(input_id)
+        input_id += tokenizer.apply_chat_template([{"role" : "system", "content" : system_message}]) # Begin with system message
+        target += [IGNORE_INDEX] * len(input_id) # mask out tokens with IGNORE_INDEX
 
         for conv in source:
-            # Make sure llava data can load
             try:
                 role = conv["role"]
                 content = conv["content"]
@@ -76,27 +71,35 @@ def preprocess_llama3(
                 role = conv["from"]
                 content = conv["value"]
 
-            role =  roles.get(role, role)
+            role =  roles.get(role, role) # map towards "user" and "assistant"
             
             conv = [{"role" : role, "content" : content}]
-            # First is bos token we don't need here
-            encode_id = tokenizer.apply_chat_template(conv)[1:]
-            input_id += encode_id
-            if role in ["user", "system"]:
+            
+            if role == "user":
+                encode_id = tokenizer.apply_chat_template(conv)[1:]
+                input_id += encode_id 
                 target += [IGNORE_INDEX] * len(encode_id)
+            elif role == "assistant":
+                mask_seq, target_seq = tokenizer.apply_chat_template(conv, tokenize=False)
+                mask_tokens = tokenizer.encode(mask_seq)[1:] # remove BOS token
+                target_tokens = tokenizer.encode(target_seq)
+                
+                input_id += mask_tokens + target_tokens
+                target += [IGNORE_INDEX] * len(mask_tokens) + target_tokens
             else:
-                target += encode_id
-        
-
+                continue # skip over 'system' message
                     
         assert len(input_id) == len(target), f"{len(input_id)} != {len(target)}"
+        
         for idx, encode_id in enumerate(input_id):
             if encode_id in unmask_tokens_idx:
                 target[idx] = encode_id
             if encode_id == image_token_index:
                 input_id[idx] = IMAGE_TOKEN_INDEX
+        
         input_ids.append(input_id)
         targets.append(target)
+    
     input_ids = torch.tensor(input_ids, dtype=torch.long)
     targets = torch.tensor(targets, dtype=torch.long)
 
