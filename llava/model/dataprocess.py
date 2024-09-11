@@ -149,7 +149,7 @@ class LazySupervisedDataset(Dataset):
 
     def process_image(self, image_path):
         image = Image.open(image_path).convert("RGB")
-        return self.image_processor(images=image, return_tensors="pt")["pixel_values"][0]
+        return self.image_processor(images=image, return_tensors="pt")["pixel_values"]
 
     def process_video(self, video_path):
         

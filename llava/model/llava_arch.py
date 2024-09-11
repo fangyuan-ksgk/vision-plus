@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 import math
 import torch
 import torch.nn as nn
+from typing import List
 
 from constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
             
@@ -68,10 +69,11 @@ class LlavaMetaForCausalLM(ABC):
         return image_features # [num_images, num_patches, feature_dim]
     
     
-    def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images):
+    def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, 
+                                             images: List[torch.FloatTensor]):
         """ 
         Interleave Image features with Text features and construct input sequence embeddings
-        Images: [batch_size, num_images, C, H, W] (Assuming multiple images per sample)
+        Images has length 'batch_size', with each element with shape [num_images, C, H, W] (num_images varies across batch)
         Input_ids represent image with IMAGE_TOKEN_INDEX, which is converted into num_patches tokens
         Labels, Input_ids, attention_mask are updated accordingly, padding is also applied here
         --------------------------------------------------------------------------------------------
@@ -88,8 +90,7 @@ class LlavaMetaForCausalLM(ABC):
         assert len(images) == len(input_ids), f"Mismatch in batch_size of images and input_ids: {len(images)} vs {len(input_ids)}"
         batch_size = len(images)
         
-        for batch_images in images:
-            num_images, C, H, W = batch_images.shape
+        for batch_images in images: # batch_images: [num_images, C, H, W]
             batch_image_features = self.encode_images(batch_images)
             image_features.append(batch_image_features)
 
@@ -103,7 +104,7 @@ class LlavaMetaForCausalLM(ABC):
             num_images_in_sequence = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
             assert num_images_in_sequence == cur_image_features.shape[0], f"Mismatch in number of images in input_ids and images: {num_images_in_sequence} vs {cur_image_features.shape[0]}"
 
-            if num_images == 0:
+            if num_images_in_sequence == 0:
                 cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)
                 new_input_embeds.append(cur_input_embeds)
                 new_labels.append(labels[batch_idx])
@@ -120,7 +121,7 @@ class LlavaMetaForCausalLM(ABC):
             for i, (ids_chunk, labels_chunk) in enumerate(zip(cur_input_ids_chunks, cur_labels_chunks)):
                 cur_input_embeds.append(self.get_model().embed_tokens(ids_chunk))
                 cur_labels.append(labels_chunk)
-                if i < num_images:
+                if i < num_images_in_sequence:
                     cur_input_embeds.append(image_features[batch_idx, i])
                     cur_labels.append(torch.full((image_features[batch_idx, i].shape[0],), IGNORE_INDEX, device=labels_chunk.device, dtype=labels_chunk.dtype))
                         
