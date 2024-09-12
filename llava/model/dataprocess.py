@@ -57,9 +57,13 @@ def preprocess_llama3(
             role = conv["from"]
             content = conv["value"]
             
-        while "<image>" in content: # Handle Video Frame Repetitions
-            frame_num = frame_counts.pop(0)
-            content = content.replace("<image>", "<image>" * frame_num, 1)
+        chunks = content.split("<image>")
+        new_content = chunks[0]  # Start with the first chunk (before any <image> token)
+        for i, chunk in enumerate(chunks[1:], 1):  # Start from the second chunk
+            if frame_counts:
+                new_content += "<image>" * frame_counts.pop(0)
+            new_content += chunk
+        content = new_content
         
         role = roles.get(role, role) # map towards "user" and "assistant"
         
