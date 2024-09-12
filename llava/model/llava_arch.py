@@ -102,7 +102,7 @@ class LlavaMetaForCausalLM(ABC):
         new_labels = []
         for batch_idx, (cur_input_ids, cur_image_features) in enumerate(zip(input_ids, image_features)):
             num_images_in_sequence = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
-            assert num_images_in_sequence == cur_image_features.shape[0], f"Mismatch in number of images in input_ids and images: {num_images_in_sequence} vs {cur_image_features.shape[0]}"
+            assert num_images_in_sequence == cur_image_features.shape[0], f"Mismatch in number of images in cur_input_ids and cur_image_features: {num_images_in_sequence} vs {cur_image_features.shape[0]}"
 
             if num_images_in_sequence == 0:
                 cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)

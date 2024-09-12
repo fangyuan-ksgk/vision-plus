@@ -1,5 +1,5 @@
 import transformers 
-from typing import Dict, Sequence
+from typing import Dict, Sequence, List
 import copy, torch, json, os, av
 from constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
 from PIL import Image
@@ -14,6 +14,7 @@ import numpy as np
 
 def preprocess_llama3(
     conversations,
+    frame_counts: List[int],
     tokenizer: transformers.PreTrainedTokenizer,
     default_system_message: str = "You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language.",
 ) -> Dict:
@@ -44,6 +45,7 @@ def preprocess_llama3(
         
     
     input_id, target = [], []
+    
     input_id += tokenizer.apply_chat_template([{"role" : "system", "content" : system_message}]) # Begin with system message
     target += [IGNORE_INDEX] * len(input_id) # mask out tokens with IGNORE_INDEX
     
@@ -54,6 +56,10 @@ def preprocess_llama3(
         except: 
             role = conv["from"]
             content = conv["value"]
+            
+        while "<image>" in content: # Handle Video Frame Repetitions
+            frame_num = frame_counts.pop(0)
+            content = content.replace("<image>", "<image>" * frame_num, 1)
         
         role = roles.get(role, role) # map towards "user" and "assistant"
         
@@ -189,20 +195,22 @@ class LazySupervisedDataset(Dataset):
         source = self.data[i]
         conversations = copy.deepcopy(source["conversations"])
         images = []
-
+        frame_counts = []
         if "media" in source:
             for media_file in source["media"]:
                 if "image" in media_file:
                     image = self.process_image(os.path.join(self.data_args.image_folder, media_file["image"]))
                     images.append((image, image.size, "image"))
+                    frame_counts.append(image.shape[0])
                 elif "video" in media_file:
                     video, _, _, _ = self.process_video(os.path.join(self.data_args.video_folder, media_file["video"]))
                     processor = self.image_processor 
                     video_frames = processor.preprocess(video, return_tensors="pt")["pixel_values"]
                     images.append((video_frames, video[0].size, "video"))
-                
+                    frame_counts.append(video_frames.shape[0])
+
         # Process the conversations and create the data dictionary
-        data_dict = preprocess_llama3(conversations, self.tokenizer)
+        data_dict = preprocess_llama3(conversations, frame_counts, self.tokenizer)
         
         if isinstance(i, int):
             data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
