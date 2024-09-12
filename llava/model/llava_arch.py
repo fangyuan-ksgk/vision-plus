@@ -94,9 +94,9 @@ class LlavaMetaForCausalLM(ABC):
             batch_image_features = self.encode_images(batch_images) # batch_image_features: [num_images, num_patches, feature_dim]
             image_features.append(batch_image_features)
 
-        # Process input ids and labels
-        input_ids = [ids[mask] for ids, mask in zip(input_ids, attention_mask)]
-        labels = [labs[mask] for labs, mask in zip(labels, attention_mask)]
+        # # Process input ids and labels
+        # input_ids = [ids[mask] for ids, mask in zip(input_ids, attention_mask)]
+        # labels = [labs[mask] for labs, mask in zip(labels, attention_mask)]
 
         new_input_embeds = []
         new_labels = []
