@@ -79,7 +79,7 @@ class LlavaMetaForCausalLM(ABC):
         --------------------------------------------------------------------------------------------
         Error Report when number of IMAGE_TOKEN_INDEX in input_ids does not match number of images
 
-        Wierd: Position_ids & Past_key_values never used in calculation
+        Wierd: Position_ids & Past_key_values & attention_mask are never used in calculation
         """
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
@@ -91,7 +91,7 @@ class LlavaMetaForCausalLM(ABC):
         batch_size = len(images)
         
         for batch_images in images: # batch_images: [num_images, C, H, W]
-            batch_image_features = self.encode_images(batch_images)
+            batch_image_features = self.encode_images(batch_images) # batch_image_features: [num_images, num_patches, feature_dim]
             image_features.append(batch_image_features)
 
         # Process input ids and labels
@@ -116,8 +116,8 @@ class LlavaMetaForCausalLM(ABC):
             cur_labels_chunks = [labels[batch_idx][split_indices[i]+1:split_indices[i+1]] for i in range(len(split_indices)-1) if split_indices[i+1] - split_indices[i] > 1]
 
             # Interleaved text embeddings and image features
-            cur_input_embeds = []
-            cur_labels = []
+            cur_input_embeds = [] # vectors
+            cur_labels = [] # integers
             for i, (ids_chunk, labels_chunk) in enumerate(zip(cur_input_ids_chunks, cur_labels_chunks)):
                 cur_input_embeds.append(self.get_model().embed_tokens(ids_chunk))
                 cur_labels.append(labels_chunk)
@@ -125,20 +125,23 @@ class LlavaMetaForCausalLM(ABC):
                     cur_input_embeds.append(image_features[batch_idx, i])
                     cur_labels.append(torch.full((image_features[batch_idx, i].shape[0],), IGNORE_INDEX, device=labels_chunk.device, dtype=labels_chunk.dtype))
                         
+            # cur_input_embeds: [cur_batch_num_embeds, feature_dim] | cur_labels: [cur_batch_num_embeds]
             new_input_embeds.append(torch.cat(cur_input_embeds))
             new_labels.append(torch.cat(cur_labels))
 
-        # Pad sequences to max length
+        # Pad sequences: to ensure for each batch, we will do "cur_batch_num_embeds ---> max_len" converstion
         max_len = max(x.shape[0] for x in new_input_embeds)
         new_input_embeds_padded = []
         new_labels_padded = torch.full((batch_size, max_len), IGNORE_INDEX, dtype=new_labels[0].dtype, device=new_labels[0].device)
-        attention_mask = torch.zeros((batch_size, max_len), dtype=torch.bool, device=new_labels[0].device)
+        # attention_mask = torch.zeros((batch_size, max_len), dtype=torch.bool, device=new_labels[0].device)
 
         for i, (cur_embeds, cur_labels) in enumerate(zip(new_input_embeds, new_labels)):
             cur_len = cur_embeds.shape[0]
             new_input_embeds_padded.append(torch.cat((cur_embeds, torch.zeros((max_len - cur_len, cur_embeds.shape[1]), dtype=cur_embeds.dtype, device=cur_embeds.device))))
             new_labels_padded[i, :cur_len] = cur_labels
-            attention_mask[i, :cur_len] = True
+            # attention_mask[i, :cur_len] = True # Wrong! Non-padded label could also be IGNORE_INDEX, which requires masking as well
+
+        attention_mask = (new_labels_padded != IGNORE_INDEX).to(dtype=torch.bool, device=new_labels_padded.device)
 
         new_input_embeds = torch.stack(new_input_embeds_padded)
 
