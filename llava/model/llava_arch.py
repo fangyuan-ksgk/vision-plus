@@ -70,7 +70,7 @@ class LlavaMetaForCausalLM(ABC):
     
     
     def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, 
-                                             images: List[torch.FloatTensor]):
+                                             images: List[torch.FloatTensor], PAD_TOKEN_ID: int):
         """ 
         Interleave Image features with Text features and construct input sequence embeddings
         Images has length 'batch_size', with each element with shape [num_images, C, H, W] (num_images varies across batch)
@@ -79,7 +79,7 @@ class LlavaMetaForCausalLM(ABC):
         --------------------------------------------------------------------------------------------
         Error Report when number of IMAGE_TOKEN_INDEX in input_ids does not match number of images
 
-        Wierd: Position_ids & Past_key_values & attention_mask are never used in calculation
+        Wierd: Position_ids & Past_key_values are never used in calculation
         """
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
@@ -94,9 +94,9 @@ class LlavaMetaForCausalLM(ABC):
             batch_image_features = self.encode_images(batch_images) # batch_image_features: [num_images, num_patches, feature_dim]
             image_features.append(batch_image_features)
 
-        # # Process input ids and labels
-        # input_ids = [ids[mask] for ids, mask in zip(input_ids, attention_mask)]
-        # labels = [labs[mask] for labs, mask in zip(labels, attention_mask)]
+        # Un-mask (This further demonstrate the redundancy of the processing here ...)
+        input_ids = [ids[mask] for ids, mask in zip(input_ids, attention_mask)]
+        labels = [labs[mask] for labs, mask in zip(labels, attention_mask)]
 
         new_input_embeds = []
         new_labels = []
@@ -137,14 +137,13 @@ class LlavaMetaForCausalLM(ABC):
         max_len = max(x.shape[0] for x in new_input_embeds)
         new_input_embeds_padded = []
         new_labels_padded = torch.full((batch_size, max_len), IGNORE_INDEX, dtype=new_labels[0].dtype, device=new_labels[0].device)
+        attention_mask = torch.full((batch_size, max_len), 0, dtype=torch.bool, device=new_labels[0].device)
 
         for i, (cur_embeds, cur_labels) in enumerate(zip(new_input_embeds, new_labels)):
             cur_len = cur_embeds.shape[0]
             new_input_embeds_padded.append(torch.cat((cur_embeds, torch.zeros((max_len - cur_len, cur_embeds.shape[1]), dtype=cur_embeds.dtype, device=cur_embeds.device))))
             new_labels_padded[i, :cur_len] = cur_labels
-            # attention_mask[i, :cur_len] = True # Wrong! Non-padded label could also be IGNORE_INDEX, which requires masking as well
-
-        attention_mask = (new_labels_padded != IGNORE_INDEX).to(dtype=torch.bool, device=new_labels_padded.device)
+            attention_mask[i, :cur_len] = 1
 
         new_input_embeds = torch.stack(new_input_embeds_padded)
 
