@@ -3,11 +3,11 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from transformers import AutoConfig, AutoModelForCausalLM, LlamaConfig
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, LlamaConfig
 
 from torch.nn import CrossEntropyLoss
 
-from transformers import LlamaModel, LlamaForCausalLM
+from transformers import LlamaModel, LlamaForCausalLM, LlamaTokenizer
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.generation.utils import GenerateOutput
 
@@ -39,13 +39,29 @@ class LlavaConfig(LlamaConfig):
     # rope_scaling: Optional[dict] = {}
 
 
+def prep_llava_llama_tokenizer(model_name_or_path: str = "meta-llama/Meta-Llama-3.1-8B-Instruct") -> AutoTokenizer:
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    tokenizer.add_special_tokens({
+        'pad_token': '[PAD]',
+        'bos_token': '<|begin_of_text|>',
+        'eos_token': '<|eot_id|>',
+        'additional_special_tokens': ['<|start_header_id|>', '<|end_header_id|>']
+    })
+    return tokenizer
+
 class LlavaLlamaModel(LlamaModel): # Remove LlavaMetaModel to reduce the trouble
+    
+    # Might need to resize token embeddings here ... (TBD)
+    
     config_class = LlavaConfig
 
     def __init__(self, config: LlamaConfig):
         super().__init__(config)
         self.config = config
-
+        
+        self.tokenizer = prep_llava_llama_tokenizer()
+        self.resize_token_embeddings(len(self.tokenizer))
+        
         if hasattr(config, "mm_vision_tower"):
             self.vision_tower = build_vision_tower(config, delay_load=getattr(config, "delay_load", False))
             self.vision_resampler = build_vision_resampler(config, vision_tower=self.vision_tower)
@@ -198,7 +214,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         if image_sizes is not None:
             inputs["image_sizes"] = image_sizes
         return inputs
-
+        
 
 AutoConfig.register("llava_llama", LlavaConfig)
 AutoModelForCausalLM.register(LlavaConfig, LlavaLlamaForCausalLM)
