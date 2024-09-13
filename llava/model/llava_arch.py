@@ -126,8 +126,8 @@ class LlavaMetaForCausalLM(ABC):
                     print(ids_chunk)
                 cur_labels.append(labels_chunk)
                 if i < num_images_in_sequence:
-                    cur_input_embeds.append(image_features[batch_idx, i])
-                    cur_labels.append(torch.full((image_features[batch_idx, i].shape[0],), IGNORE_INDEX, device=labels_chunk.device, dtype=labels_chunk.dtype))
+                    cur_input_embeds.append(image_features[batch_idx][i])
+                    cur_labels.append(torch.full((image_features[batch_idx][i].shape[0],), IGNORE_INDEX, device=labels_chunk.device, dtype=labels_chunk.dtype))
                         
             # cur_input_embeds: [cur_batch_num_embeds, feature_dim] | cur_labels: [cur_batch_num_embeds]
             new_input_embeds.append(torch.cat(cur_input_embeds))
