@@ -137,6 +137,16 @@ def process_video_with_pyav(video_file, data_args):
     return video, video_time, frame_time, num_frames_to_sample
 
     
+def modality_map(mode: int, idx: int):
+    """ 
+    One-hot scaled encoder for image & video with ids
+    mode: 0 for image, 1 for video
+    idx: the first image, the first video within the data_dict etc.
+    """
+    idx = int(idx)
+    return torch.tensor([idx if mode == 0 else 0, idx if mode == 1 else 0])
+        
+        
 class LazySupervisedDataset(Dataset):
     
     def __init__(self, data_args, tokenizer, image_processor):
@@ -198,22 +208,29 @@ class LazySupervisedDataset(Dataset):
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         """ 
         Interleaved text, image, video
+        modality: [idx, 0] for idx-th image, [0, idx] for idx-th video
+        modality has same length as number of frames, to identify image and video respectively
         """
         source = self.data[i]
         conversations = copy.deepcopy(source["conversations"])
         images = []
         frame_counts = []
+        image_count, video_count = 0, 0
         if "media" in source:
             for media_file in source["media"]:
                 if "image" in media_file:
                     image = self.process_image(os.path.join(self.data_args.image_folder, media_file["image"]))
-                    images.append((image, image.size, "image"))
+                    image_count += 1
+                    modality = modality_map(0, image_count)
+                    images.append((image, modality))
                     frame_counts.append(image.shape[0])
                 elif "video" in media_file:
                     video, _, _, _ = self.process_video(os.path.join(self.data_args.video_folder, media_file["video"]))
                     processor = self.image_processor 
                     video_frames = processor.preprocess(video, return_tensors="pt")["pixel_values"]
-                    images.append((video_frames, video[0].size, "video"))
+                    video_count += 1
+                    modality = modality_map(1, video_count)
+                    images.append((video_frames, modality))
                     frame_counts.append(video_frames.shape[0])
 
         # Process the conversations and create the data dictionary
@@ -223,7 +240,8 @@ class LazySupervisedDataset(Dataset):
             data_dict = dict(input_ids=data_dict["input_ids"][0], labels=data_dict["labels"][0])
 
         # Add image or video data if present | Unite video & image
-        if images:
+        
+        if images: # I think it's important to include them anyway ... ? 
             data_dict["image"] = images
 
         data_dict["id"] = source.get("id", i)
@@ -242,35 +260,39 @@ class DataCollatorForSupervisedDataset(object):
         return input_ids
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        
+        """ 
+        Padding: 
+        input_ids: tokenizer.pad_token_id 
+        images: torch.zeros 
+        modalities: torch.zeros 
+        lables: IGNORE_INDEX 
+        """        
         input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
 
         input_ids = [_input_ids[: self.tokenizer.model_max_length] for _input_ids in input_ids]
         labels = [_labels[: self.tokenizer.model_max_length] for _labels in labels]
         
-        if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token_id = 0 # This gets the best result. Don't know why. (I follow the setting, don't know why)
+        assert self.tokenizer.pad_token_id is not None, "Pad token id is not set!" # LLaVA uses pad_token_id = 0, which means '!' and claims good performance
             
         input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
         labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
 
-        batch = dict(input_ids=input_ids, labels=labels.long() if labels.dtype == torch.int32 else labels, attention_mask=input_ids.ne(self.tokenizer.pad_token_id))
-
-        if "image" in instances[0]:
-            images = [instance["image"] for instance in instances]
-
-            batch["image_sizes"] = [im[1] for im_list in images for im in im_list]
-            batch["modalities"] = [im[2] for im_list in images for im in im_list]
-            images = [im[0] for im_list in images for im in im_list]
-
-            # if all(x is not None and x.shape == images[0].shape for x in images):
-                # Image: (N, P, C, H, W)
-                # Video: (N, F, C, H, W)
-            #     batch["images"] = torch.stack(images)
-            # else:
-            batch["images"] = images
-
-        if "prompt" in instances[0]:
-            batch["prompts"] = [instance["prompt"] for instance in instances]
-
+        image_tuples = [instance["image"] for instance in instances]
+        
+        images = [torch.cat([im[0] for im in im_list], dim=0) for im_list in image_tuples]
+        modalities = [torch.cat([im[1].unsqueeze(0) for im in im_list], dim=0) for im_list in image_tuples]
+        
+        # print("Modalities shape: ", modalities[0].shape)
+        
+        max_img_len = max(img.size(0) for img in images)
+    
+        images = torch.stack([torch.nn.functional.pad(img, (0, 0, 0, 0, 0, max_img_len - img.size(0))) for img in images])
+        modalities = torch.stack([torch.nn.functional.pad(mod, (0, 0, 0, max_img_len - mod.size(0))) for mod in modalities])
+        
+        batch = dict(input_ids=input_ids, 
+                     labels=labels.long() if labels.dtype == torch.int32 else labels, 
+                     attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+                     images=images,
+                     modalities=modalities)
+        
         return batch
