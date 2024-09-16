@@ -149,7 +149,10 @@ def modality_map(mode: int, idx: int, num_frames: int = 1):
     """
     idx = int(idx)
     base_tensor = torch.tensor([idx if mode == 0 else 0, idx if mode == 1 else 0])
-    return base_tensor.repeat(num_frames, 1)
+    if num_frames > 1:
+        return base_tensor.repeat(num_frames, 1)
+    else:
+        return base_tensor.unsqueeze(0)
 
 
 class LazySupervisedDataset(Dataset):
@@ -285,7 +288,7 @@ class DataCollatorForSupervisedDataset(object):
         image_tuples = [instance["image"] for instance in instances]
         
         images = [torch.cat([im[0] for im in im_list], dim=0) for im_list in image_tuples]
-        modalities = [torch.cat([im[1].unsqueeze(0) for im in im_list], dim=0) for im_list in image_tuples]
+        modalities = [torch.cat([im[1] for im in im_list], dim=0) for im_list in image_tuples]
         
         # print("Modalities shape: ", modalities[0].shape)
         
