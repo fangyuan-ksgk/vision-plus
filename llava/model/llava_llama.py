@@ -45,11 +45,14 @@ def prep_llava_llama_tokenizer(model_name_or_path: str = "meta-llama/Meta-Llama-
         'pad_token': '[PAD]',
         'bos_token': '<|begin_of_text|>',
         'eos_token': '<|eot_id|>',
-        'img_start_token': '<|start_image_id|>',
-        'img_end_token': '<|end_image_id|>',
-        'vid_start_token': '<|start_video_id|>',
-        'vid_end_token': '<|end_video_id|>',
-        'additional_special_tokens': ['<|start_header_id|>', '<|end_header_id|>']
+        'additional_special_tokens': [
+                                    '<|start_header_id|>', 
+                                    '<|end_header_id|>',
+                                    '<|start_image_id|>',
+                                    '<|end_image_id|>',
+                                    '<|start_video_id|>',
+                                    '<|end_video_id|>',
+                                    ]
     })
     return tokenizer
 
