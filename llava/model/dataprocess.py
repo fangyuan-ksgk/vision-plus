@@ -140,16 +140,18 @@ def process_video_with_pyav(video_file, data_args):
     return video, video_time, frame_time, num_frames_to_sample
 
     
-def modality_map(mode: int, idx: int):
+def modality_map(mode: int, idx: int, num_frames: int = 1):
     """ 
     One-hot scaled encoder for image & video with ids
     mode: 0 for image, 1 for video
     idx: the first image, the first video within the data_dict etc.
+    num_frames: number of frames to repeat the tensor
     """
     idx = int(idx)
-    return torch.tensor([idx if mode == 0 else 0, idx if mode == 1 else 0])
-        
-        
+    base_tensor = torch.tensor([idx if mode == 0 else 0, idx if mode == 1 else 0])
+    return base_tensor.repeat(num_frames, 1)
+
+
 class LazySupervisedDataset(Dataset):
     
     def __init__(self, data_args, tokenizer, image_processor):
@@ -232,7 +234,7 @@ class LazySupervisedDataset(Dataset):
                     processor = self.image_processor 
                     video_frames = processor.preprocess(video, return_tensors="pt")["pixel_values"]
                     video_count += 1
-                    modality = modality_map(1, video_count)
+                    modality = modality_map(1, video_count, video_frames.shape[0])
                     images.append((video_frames, modality))
                     frame_counts.append(video_frames.shape[0])
 
