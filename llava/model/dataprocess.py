@@ -35,6 +35,9 @@ def preprocess_llama3(
 
     unmask_tokens = ["<|begin_of_text|>", "<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>", "\n\n"]
     unmask_tokens_idx = [tokenizer.convert_tokens_to_ids(tok) for tok in unmask_tokens]
+    
+    img_start_token = tokenizer.img_start_token
+    img_end_token = tokenizer.img_end_token
 
     input_ids, targets = [], []
     
@@ -60,6 +63,8 @@ def preprocess_llama3(
             role = conv["from"]
             content = conv["value"]
             
+        content = content.replace("<image>", f"{tokenizer.img_start_token} <image> {tokenizer.img_end_token}")
+        
         chunks = content.split("<image>")
         new_content = chunks[0]  # Start with the first chunk (before any <image> token)
         for i, chunk in enumerate(chunks[1:], 1):  # Start from the second chunk
