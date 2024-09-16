@@ -70,19 +70,9 @@ class LlavaMetaForCausalLM(ABC):
     
     
     def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, 
-                                             images: List[torch.FloatTensor], modalities: List[torch.FloatTensor],PAD_TOKEN_ID: int):
+                                             images: List[torch.FloatTensor], modalities: List[torch.FloatTensor]):
         """ 
-        Embed image & video. Caveat 1. Drop padded images. Caveat 2. Group consecutive frames
-        Note that input here is already a padded tensor
-        
-        Interleave Image features with Text features and construct input sequence embeddings
-        Images has length 'batch_size', with each element with shape [num_images, C, H, W] (num_images varies across batch)
-        Input_ids represent image with IMAGE_TOKEN_INDEX, which is converted into num_patches tokens
-        Labels, Input_ids, attention_mask are updated accordingly, padding is also applied here
-        --------------------------------------------------------------------------------------------
-        Error Report when number of IMAGE_TOKEN_INDEX in input_ids does not match number of images
-
-        Wierd: Position_ids & Past_key_values are never used in calculation
+        Modality embedding processing & padding
         """
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
