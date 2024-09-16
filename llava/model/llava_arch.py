@@ -70,9 +70,10 @@ class LlavaMetaForCausalLM(ABC):
     
     
     def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, 
-                                             images: List[torch.FloatTensor], PAD_TOKEN_ID: int):
+                                             images: List[torch.FloatTensor], modalities: List[torch.FloatTensor],PAD_TOKEN_ID: int):
         """ 
         Embed image & video. Caveat 1. Drop padded images. Caveat 2. Group consecutive frames
+        Note that input here is already a padded tensor
         
         Interleave Image features with Text features and construct input sequence embeddings
         Images has length 'batch_size', with each element with shape [num_images, C, H, W] (num_images varies across batch)
@@ -87,16 +88,21 @@ class LlavaMetaForCausalLM(ABC):
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels
 
-        # Encode all images
+        # Encode all frames
         image_features = []
         assert len(images) == len(input_ids), f"Mismatch in batch_size of images and input_ids: {len(images)} vs {len(input_ids)}"
         batch_size = len(images)
         
-        for batch_images in images: # batch_images: [num_images, C, H, W]
-            batch_image_features = self.encode_images(batch_images) # batch_image_features: [num_images, num_patches, feature_dim]
+        for batch_images, batch_modalities in zip(images, modalities): 
+            img_mask = batch_modalities[:, 0] != 0
+            vid_mask = batch_modalities[:, 1] != 0
+            visual_mask = img_mask | vid_mask 
+            batch_images = batch_images[visual_mask]
+            batch_image_features = self.encode_images(batch_images) # Frame-wise encoding (extendable to video encoding in the future)
             image_features.append(batch_image_features)
 
-        # Un-mask (This further demonstrate the redundancy of the processing here ...)
+        # Note: IMAGE_TOKEN_INDEX --> IMG_START_TOKEN, embedding, IMG_END_TOKEN
+        #    -- Due to above manipulation, which changes the length of input ids and embeddings, we would un-mask and pad again
         input_ids = [ids[mask] for ids, mask in zip(input_ids, attention_mask)]
         labels = [labs[mask] for labs, mask in zip(labels, attention_mask)]
 
