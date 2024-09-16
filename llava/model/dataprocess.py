@@ -66,8 +66,8 @@ def preprocess_llama3(
         chunks = content.split("<image>")
         new_content = chunks[0]  # Start with the first chunk (before any <image> token)
         for i, chunk in enumerate(chunks[1:], 1):  # Start from the second chunk
-            if frame_counts:
-                new_content += "<image>" * frame_counts.pop(0)
+            if frame_counts: # Direct Place for Telling Video apart from Image
+                new_content += "<image>" * frame_counts.pop(0) # Results: <|start_image_id|> <image> <image> <image> <|end_image_id|> (not really?)
             new_content += chunk
         content = new_content
         
