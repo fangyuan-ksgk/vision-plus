@@ -257,6 +257,18 @@ class LazySupervisedDataset(Dataset):
         return data_dict
     
     
+def to_cuda(batch):
+    if not torch.cuda.is_available():
+        return batch
+    if isinstance(batch, torch.Tensor):
+        return batch.cuda()
+    elif isinstance(batch, dict):
+        return {key: to_cuda(value) for key, value in batch.items()}
+    elif isinstance(batch, list):
+        return [to_cuda(item) for item in batch]
+    else:
+        return batch
+        
 @dataclass
 class DataCollatorForSupervisedDataset(object):
 
@@ -303,15 +315,4 @@ class DataCollatorForSupervisedDataset(object):
                      images=images,
                      modalities=modalities)
         
-        return batch
-    
-    
-def to_cuda(batch):
-    if isinstance(batch, torch.Tensor):
-        return batch.cuda()
-    elif isinstance(batch, dict):
-        return {key: to_cuda(value) for key, value in batch.items()}
-    elif isinstance(batch, list):
-        return [to_cuda(item) for item in batch]
-    else:
-        return batch
+        return to_cuda(batch)
