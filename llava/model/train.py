@@ -1,7 +1,16 @@
 from transformers import Trainer, TrainingArguments
 from peft import LoraConfig, get_peft_model
 
-def train(model, tokenizer, train_dataset, eval_dataset=None, use_lora=False):
+class MMTrainer(Trainer):
+    def __init__(self, *args, custom_train_dataloader=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.custom_train_dataloader = custom_train_dataloader
+
+    def get_train_dataloader(self): # Wrap on customized dataloader
+        return self.custom_train_dataloader
+
+
+def train(model, tokenizer, train_dataloader, eval_dataloader=None, use_lora=False):
     # Define training arguments
     training_args = TrainingArguments(
         output_dir="./results",
@@ -18,7 +27,7 @@ def train(model, tokenizer, train_dataset, eval_dataset=None, use_lora=False):
         lora_config = LoraConfig(
             r=16,
             lora_alpha=32,
-            target_modules=["query", "value"],
+            target_modules=["mm_projector"],
             lora_dropout=0.05,
             bias="none",
             task_type="CAUSAL_LM"
@@ -26,12 +35,11 @@ def train(model, tokenizer, train_dataset, eval_dataset=None, use_lora=False):
         model = get_peft_model(model, lora_config)
 
     # Create Trainer instance
-    trainer = Trainer(
+    trainer = MMTrainer(
         model=model,
         args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
-        tokenizer=tokenizer,
+        custom_train_dataloader = train_dataloader,
+        tokenizer=tokenizer
     )
 
     # Train the model
