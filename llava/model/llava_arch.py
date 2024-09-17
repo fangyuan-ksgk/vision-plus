@@ -119,9 +119,11 @@ class LlavaMetaForCausalLM(ABC):
             for i, (ids_chunk, labels_chunk) in enumerate(zip(cur_input_ids_chunks, cur_labels_chunks)):
                 try:
                     cur_input_embeds.append(self.get_model().embed_tokens(ids_chunk)) # token ids not included in the tokenizer ?
-                except:
+                except Exception as e:
+                    print(f"Error converting id chunk to input embeddings: {e}")
                     print("Issuing id chunk failed to get converted into input embeddings: ")
                     print(ids_chunk)
+                    
                 cur_labels.append(labels_chunk)
                 if i < num_images_in_sequence:
                     cur_input_embeds.append(image_features[batch_idx][i])
