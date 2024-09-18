@@ -192,6 +192,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         modalities: Optional[List[str]] = ["image"],
         position_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        max_new_tokens: Optional[int] = 512,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         
