@@ -187,22 +187,18 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     @torch.no_grad()
     def generate(
         self,
-        inputs: Optional[torch.Tensor] = None,
-        images: Optional[torch.Tensor] = None,
-        image_sizes: Optional[torch.Tensor] = None,
+        input_ids: Optional[torch.LongTensor] = None,
+        images: Optional[torch.FloatTensor] = None,
         modalities: Optional[List[str]] = ["image"],
+        position_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
-        modalities = kwargs.pop("modalities", None) if "modalities" in kwargs and modalities is None else modalities
-        position_ids = kwargs.pop("position_ids", None)
-        attention_mask = kwargs.pop("attention_mask", None)
-        if "inputs_embeds" in kwargs:
-            raise NotImplementedError("`inputs_embeds` is not supported for generation method.")
-
+        
         if images is not None:
-            (inputs, position_ids, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_multimodal(inputs, position_ids, attention_mask, None, None, images, modalities)
+            (input_ids, position_ids, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, None, None, images, modalities)
         else:
-            inputs_embeds = self.get_model().embed_tokens(inputs)
+            inputs_embeds = self.get_model().embed_tokens(input_ids)
 
         return super().generate(position_ids=position_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds, **kwargs)
 

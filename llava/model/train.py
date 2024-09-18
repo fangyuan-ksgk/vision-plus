@@ -1,6 +1,9 @@
 from transformers import Trainer, TrainingArguments
 from peft import LoraConfig, get_peft_model
 
+import multiprocessing
+multiprocessing.set_start_method('spawn', force=True)
+
 class MMTrainer(Trainer):
     def __init__(self, *args, custom_train_dataloader=None, **kwargs):
         super().__init__(*args, **kwargs)
