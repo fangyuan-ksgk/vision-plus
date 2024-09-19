@@ -35,7 +35,7 @@ def preprocess_inference_inputs(
     
     temp_completion = "#####"
     
-    prompt = tokenizer.apply_chat_template(conversations + [{"role": "system", "content": default_system_message}], tokenize=False)
+    prompt = tokenizer.apply_chat_template([{"role": "system", "content": default_system_message}] + conversations + [{"role": "assistant", "content": temp_completion}], tokenize=False)
     prompt = prompt.split(temp_completion)[0]
     
     input_ids = tokenizer.encode(prompt)
