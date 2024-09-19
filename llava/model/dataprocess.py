@@ -15,6 +15,37 @@ from torch.nn.utils.rnn import pad_sequence
 # -- In this data processing pipeline, we did not update the tokenizer, therefore DEFAULT_IM_START_TOKEN & DEFAULT_IM_END_TOKEN should NOT BE INCLUDED !
 
 
+def preprocess_inference_inputs(
+    conversations,
+    frame_counts: List[int],
+    tokenizer: transformers.PreTrainedTokenizer,
+    default_system_message: str = "You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language.",
+) -> Dict:
+    """ 
+    Prepare input_ids for inference with chat-template. 
+    - convert <image> to IMAGE_TOKEN_INDEX and make sure targets are correct
+    """
+    # One thing:
+    # 1. Chat Template application with <assistant_start> token at the end 
+    # I don't need to repeat <image> for videos here -- input_embeds should take care of this
+    
+    tokenizer = copy.deepcopy(tokenizer) # deepcopy to avoid modification of tokenzier (the '<image>' is a placeholder, not included in actual input_ids)
+    tokenizer.add_tokens(["<image>"], special_tokens=True)
+    image_token_index = tokenizer.convert_tokens_to_ids("<image>")
+    
+    temp_completion = "#####"
+    
+    prompt = tokenizer.apply_chat_template(conversations + [{"role": "system", "content": default_system_message}], tokenize=False)
+    prompt = prompt.split(temp_completion)[0]
+    
+    input_ids = tokenizer.encode(prompt)
+    input_ids = [IMAGE_TOKEN_INDEX if token == image_token_index else token for token in input_ids]
+    input_ids = torch.tensor(input_ids, dtype=torch.long)
+    return input_ids 
+    
+    
+
+
 def preprocess_llama3(
     conversations,
     frame_counts: List[int],
@@ -157,13 +188,77 @@ def modality_map(mode: int, idx: int, num_frames: int = 1):
 
 
 
-class LazySupervisedDataset(Dataset):
+class LazyProcessor: # For inference with VLM
     
     def __init__(self, data_args, tokenizer, image_processor):
         self.tokenizer = tokenizer
         self.image_processor = image_processor
+        self.data = {}
         self.data_args = data_args
-        self.data = self.load_data(data_args.data_path)
+                
+    def query(self, question: str, media_paths: List[str], id: str = "test"):
+        if id not in self.data:
+            self.data[id] = {"conversations": [], "media": []}
+        
+        if "<image>" not in question:
+            question = "<image>" * len(media_paths) + " " + question
+
+        self.data[id]["conversations"].append({"role": "user", "content": question})
+        
+        for media_path in media_paths:
+            if media_path.lower().endswith((".jpg", ".png", ".jpeg")):
+                self.data[id]["media"].append({"image": media_path})
+            elif media_path.lower().endswith((".mp4", ".avi", ".mov")):
+                self.data[id]["media"].append({"video": media_path})
+            else:
+                raise ValueError(f"Unsupported media type: {media_path}")
+        
+    def process_data(self, device: str = "cuda"):
+        dataset = LazySupervisedDataset(self.data_args, self.tokenizer, self.image_processor, self.data)
+        
+        data_dicts = []
+        for _, data in self.data.items():
+            images = []
+            frame_counts = []
+            image_count, video_count = 0, 0
+            if "media" in data:
+                for media_file in data["media"]:
+                    if "image" in media_file:
+                        image = dataset.process_image(media_file["image"])
+                        image_count += 1
+                        modality = modality_map(0, image_count)
+                        images.append((image, modality))
+                        frame_counts.append(image.shape[0])
+                    elif "video" in media_file:
+                        video, _, _, _ = dataset.process_video(media_file["video"])
+                        processor = self.image_processor 
+                        video_frames = processor.preprocess(video, return_tensors="pt")["pixel_values"]
+                        video_count += 1
+                        modality = modality_map(1, video_count, video_frames.shape[0])
+                        images.append((video_frames, modality))
+                        frame_counts.append(video_frames.shape[0])
+            
+            input_ids = preprocess_inference_inputs(data['conversations'], frame_counts, self.tokenizer).to(device)
+            modalities = [t[1].to(device) for t in images]
+            images = [t[0].to(device) for t in images]
+            data_dicts.append({"input_ids": input_ids, "images": images, "modalities": modalities})
+
+        return dict(input_ids = [d["input_ids"] for d in data_dicts],
+                    images = [d["images"] for d in data_dicts],
+                    modalities = [d["modalities"] for d in data_dicts])
+    
+
+
+class LazySupervisedDataset(Dataset):
+    
+    def __init__(self, data_args, tokenizer, image_processor, data=None):
+        self.tokenizer = tokenizer
+        self.image_processor = image_processor
+        self.data_args = data_args
+        if data is None:
+            self.data = self.load_data(data_args.data_path)
+        else:
+            self.data = data
 
     def load_data(self, data_path):
         """ 

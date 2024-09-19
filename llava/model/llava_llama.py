@@ -185,16 +185,18 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         modalities: Optional[List[str]] = ["image"],
         position_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        labels: Optional[torch.LongTensor] = None,
         max_new_tokens: Optional[int] = 512,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         
         if images is not None:
-            (input_ids, position_ids, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, None, None, images, modalities)
+            (_, _, attention_mask, _, inputs_embeds, _) = self.prepare_inputs_labels_for_multimodal(input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities)
         else:
             inputs_embeds = self.get_model().embed_tokens(input_ids)
 
-        return super().generate(position_ids=position_ids, attention_mask=attention_mask, inputs_embeds=inputs_embeds, **kwargs)
+        return super().generate(attention_mask=attention_mask, inputs_embeds=inputs_embeds, **kwargs)
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
         """ 

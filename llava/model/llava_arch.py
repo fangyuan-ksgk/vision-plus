@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import math
 import torch
 import torch.nn as nn
-from typing import List
+from typing import List, Optional
 
 from constants import IMAGE_TOKEN_INDEX, IGNORE_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
             
@@ -67,7 +67,7 @@ class LlavaMetaForCausalLM(ABC):
         # image_features = [self.add_token_per_frame(image_feature) for image_feature in image_features]
         
         return image_features # [num_images, num_patches, feature_dim]
-    
+        
     
     def prepare_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, 
                                              images: List[torch.FloatTensor], modalities: List[torch.FloatTensor]):
