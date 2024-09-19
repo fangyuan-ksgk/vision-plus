@@ -63,69 +63,55 @@ def prep_llava_llama_tokenizer(model_name_or_path: str = "meta-llama/Meta-Llama-
     })
     return tokenizer
 
-class LlavaLlamaModel(LlamaModel): # Remove LlavaMetaModel to reduce the trouble
-    
-    # Might need to resize token embeddings here ... (TBD)
-    
+class LlavaLlamaModel(LlamaModel):
     config_class = LlavaConfig
 
-    def __init__(self, config: LlamaConfig):
+    def __init__(self, config: LlavaConfig):
         super().__init__(config)
         self.config = config
         
-        # self.tokenizer = prep_llava_llama_tokenizer()
-        # self.resize_token_embeddings(len(self.tokenizer))
+        # Initialize vision tower with delay_load option
+        self.vision_tower = build_vision_tower(config, delay_load=getattr(config, "delay_load", False))
+        if not getattr(config, "delay_load", False):
+            self.vision_tower.load_model()
         
-        if hasattr(config, "mm_vision_tower"):
-            self.vision_tower = build_vision_tower(config, delay_load=getattr(config, "delay_load", False))
-            self.vision_resampler = build_vision_resampler(config, vision_tower=self.vision_tower)
-            self.mm_projector = build_vision_projector(config, vision_cfg=self.vision_tower.config)
-
-            if "unpad" in getattr(config, "mm_patch_merge_type", ""):
-                self.image_newline = nn.Parameter(torch.empty(config.hidden_size))
+        # Initialize mm_projector
+        self.mm_projector = build_vision_projector(config, vision_cfg=self.vision_tower.config)        
 
     def get_vision_tower(self):
         return self.vision_tower
+    
+    def get_mm_projector(self):
+        return self.mm_projector
 
-    def initialize_vision_modules(self, model_args):
-        # Update config with vision-related parameters
-        self.config.mm_vision_tower = model_args.mm_vision_tower
-        self.config.mm_hidden_size = self.vision_resampler.mm_hidden_size
-        self.config.mm_vision_select_layer = model_args.mm_vision_select_layer
-        self.config.mm_vision_select_feature = model_args.mm_vision_select_feature
-
-        # Load vision tower if not already loaded
-        if self.vision_tower is None:
-            self.vision_tower = build_vision_tower(model_args)
-            self.vision_resampler = build_vision_resampler(model_args, vision_tower=self.vision_tower)
-        else:
-            self.vision_tower.load_model()
-
-        # Ensure gradients are enabled for vision resampler
-        for p in self.vision_resampler.parameters():
-            p.requires_grad = True
-
-        # Initialize mm_projector if not already present
-        if not hasattr(self, "mm_projector"):
-            self.mm_projector = build_vision_projector(self.config, vision_cfg=self.vision_tower.config)
-
-        # Ensure gradients are enabled for mm_projector
-        for p in self.mm_projector.parameters():
-            p.requires_grad = True
-
-
-class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
+class LlavaLlamaForCausalLM(LlamaForCausalLM):
     config_class = LlavaConfig
     
     def __init__(self, config):
-        LlamaForCausalLM.__init__(self, config)
+        super().__init__(config)
         
         config.model_type = "llava_llama"
         
         self.model = LlavaLlamaModel(config)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        # Initalize weight and apply final processing
+        # Initialize weight and apply final processing
         self.post_init()
+
+    @classmethod
+    def from_pretrained_lm(cls, 
+                        config: Optional[LlavaConfig] = None,
+                        *model_args, **kwargs):
+
+        # Create model instance
+        model = cls(config)
+        
+        # Load pretrained weights
+        state_dict = LlamaForCausalLM.from_pretrained(config.model_name_or_path).state_dict()
+        
+        # Load state dict with strict=False to allow for missing or extra keys
+        model.load_state_dict(state_dict, strict=False)
+        
+        return model
         
     def get_model(self):
         return self.model 
