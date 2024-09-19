@@ -35,8 +35,15 @@ class LlavaConfig(LlamaConfig):
     use_im_patch_token: bool = True
     delay_load: bool = True
     mm_resampler_type: Optional[str] = None
-    hidden_size: int = 768  # This one should match with the language model
-    # rope_scaling: Optional[dict] = {}
+
+    def __init__(self, **kwargs):
+        llama_3_1_config = LlamaConfig.from_pretrained(self.model_name_or_path)
+        super().__init__(**vars(llama_3_1_config), **kwargs)
+        
+        # Set LLaVA-specific attributes
+        for key, value in self.__class__.__dict__.items():
+            if not key.startswith("__") and not callable(value):
+                setattr(self, key, value)
 
 
 def prep_llava_llama_tokenizer(model_name_or_path: str = "meta-llama/Meta-Llama-3.1-8B-Instruct") -> AutoTokenizer:
@@ -66,8 +73,8 @@ class LlavaLlamaModel(LlamaModel): # Remove LlavaMetaModel to reduce the trouble
         super().__init__(config)
         self.config = config
         
-        self.tokenizer = prep_llava_llama_tokenizer()
-        self.resize_token_embeddings(len(self.tokenizer))
+        # self.tokenizer = prep_llava_llama_tokenizer()
+        # self.resize_token_embeddings(len(self.tokenizer))
         
         if hasattr(config, "mm_vision_tower"):
             self.vision_tower = build_vision_tower(config, delay_load=getattr(config, "delay_load", False))
