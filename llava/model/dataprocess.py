@@ -1,5 +1,5 @@
 import transformers 
-from typing import Dict, Sequence, List
+from typing import Dict, Sequence, List, Optional
 import copy, torch, json, os, av
 from constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
 from PIL import Image
@@ -17,7 +17,6 @@ from torch.nn.utils.rnn import pad_sequence
 
 def preprocess_inference_inputs(
     conversations,
-    frame_counts: List[int],
     tokenizer: transformers.PreTrainedTokenizer,
     default_system_message: str = "You are a helpful language and vision assistant. You are able to understand the visual content that the user provides, and assist the user with a variety of tasks using natural language.",
 ) -> Dict:
@@ -196,7 +195,7 @@ class LazyProcessor: # For inference with VLM
         self.data = {}
         self.data_args = data_args
                 
-    def query(self, question: str, media_paths: List[str], id: str = "test"):
+    def query(self, question: str, media_paths: Optional[List[str]] = None, id: str = "test"):
         if id not in self.data:
             self.data[id] = {"conversations": [], "media": []}
         
@@ -216,7 +215,8 @@ class LazyProcessor: # For inference with VLM
     def process_data(self, device: str = "cuda"):
         dataset = LazySupervisedDataset(self.data_args, self.tokenizer, self.image_processor, self.data)
         
-        data_dicts = []
+        data_with_media = []
+        data_without_media = []
         for _, data in self.data.items():
             images = []
             frame_counts = []
@@ -237,32 +237,56 @@ class LazyProcessor: # For inference with VLM
                         modality = modality_map(1, video_count, video_frames.shape[0])
                         images.append((video_frames, modality))
                         frame_counts.append(video_frames.shape[0])
+                        
+                    
             
-            input_ids = preprocess_inference_inputs(data['conversations'], frame_counts, self.tokenizer).to(device)
+            input_ids = preprocess_inference_inputs(data['conversations'], self.tokenizer).to(device)
             modalities = [t[1].to(device) for t in images]
             images = [t[0].to(device) for t in images]
-            data_dicts.append({"input_ids": input_ids, "images": images, "modalities": modalities})
+            if images:
+                data_with_media.append({"input_ids": input_ids, "images": images, "modalities": modalities})
+            else:
+                data_without_media.append({"input_ids": input_ids})
+                
+                
+        # Deal with Data with Media
+        if data_with_media:
+            input_ids = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_with_media]
+            labels = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_with_media]
             
-        input_ids = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_dicts]
-        labels = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_dicts]
-        images = [torch.cat(d["images"], dim=0) for d in data_dicts]
-        modalities = [torch.cat(d["modalities"], dim=0) for d in data_dicts]
+            images = [torch.cat(d["images"], dim=0) for d in data_with_media]
+            modalities = [torch.cat(d["modalities"], dim=0) for d in data_with_media]
 
-        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
-        labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) # Dummy Value useless for generation
+            input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+            labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) # Dummy Value useless for generation
 
-        max_img_len = max(img.size(0) for img in images)
-        
-        images = torch.stack([torch.nn.functional.pad(img, (0, 0, 0, 0, 0, max_img_len - img.size(0))) for img in images])
-        modalities = torch.stack([torch.nn.functional.pad(mod, (0, 0, 0, max_img_len - mod.size(0))) for mod in modalities])
+            max_img_len = max(img.size(0) for img in images)
+            
+            images = torch.stack([torch.nn.functional.pad(img, (0, 0, 0, 0, 0, max_img_len - img.size(0))) for img in images])
+            modalities = torch.stack([torch.nn.functional.pad(mod, (0, 0, 0, max_img_len - mod.size(0))) for mod in modalities])
 
-        batch = dict(input_ids=input_ids, 
-                    labels=input_ids,
-                    attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
-                    images=images,
-                    modalities=modalities)
-    
-        return batch
+            batch_with_media = dict(input_ids=input_ids, 
+                        labels=labels,
+                        attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+                        images=images,
+                        modalities=modalities)
+        else:
+            batch_with_media = None
+            
+        if data_without_media:
+            input_ids = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_without_media]
+            labels = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_without_media]
+            
+            input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+            labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) # Dummy Value useless for generation
+            
+            batch_without_media = dict(input_ids=input_ids, 
+                                       labels=labels,
+                                       attention_mask=input_ids.ne(self.tokenizer.pad_token_id))
+        else:
+            batch_without_media = None
+            
+        return batch_with_media, batch_without_media
     
 
 
