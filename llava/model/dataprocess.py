@@ -492,3 +492,16 @@ def prepare_docci_data(output_json_path, image_folder="data/docci"):
     )
     
     return data_args
+
+def generate_text(prompt, model, tokenizer, device, generation_config):
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    
+    # Generate
+    outputs = model.generate(
+        **inputs,
+        **generation_config
+    )
+    
+    # Decode and return the generated text
+    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return generated_text
