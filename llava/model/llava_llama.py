@@ -84,7 +84,7 @@ class LlavaLlamaModel(LlamaModel):
     def get_mm_projector(self):
         return self.mm_projector
 
-class LlavaLlamaForCausalLM(LlamaForCausalLM):
+class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaConfig
     
     def __init__(self, config):
