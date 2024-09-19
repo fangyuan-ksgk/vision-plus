@@ -248,8 +248,6 @@ class LazyProcessor: # For inference with VLM
             else:
                 data_without_media.append({"input_ids": input_ids})
                 
-                
-        # Deal with Data with Media
         if data_with_media:
             input_ids = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_with_media]
             labels = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_with_media]
@@ -287,6 +285,22 @@ class LazyProcessor: # For inference with VLM
             batch_without_media = None
             
         return batch_with_media, batch_without_media
+    
+    
+    def get_response(self, llava_model, tokenizer):
+        data_w_media, data_w_text = self.process_data()
+        generate_texts = []
+        if data_w_media: 
+            output = llava_model.generate(**data_w_media)
+            for out in output:
+                generate_texts.append(tokenizer.decode(out.tolist(), skip_special_tokens=True))
+        if data_w_text:
+            output = llava_model.generate(**data_w_text)
+            for out in output:
+                generate_texts.append(tokenizer.decode(out.tolist(), skip_special_tokens=True))
+        return generate_texts
+        
+
     
 
 
