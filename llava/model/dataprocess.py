@@ -363,7 +363,6 @@ def prepare_docci_data(output_json_path, image_folder="data/docci"):
         }
         
         data_json.append(data_item)
-        break
     
     # Save the converted data to a JSON file
     with open(output_json_path, 'w') as f:
