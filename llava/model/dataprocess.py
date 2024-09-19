@@ -245,8 +245,8 @@ class LazyProcessor: # For inference with VLM
             
         input_ids = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_dicts]
         labels = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_dicts]
-        images = [torch.cat(imgs, dim=0) for imgs in images]
-        modalities = [torch.cat(mods, dim=0) for mods in modalities]
+        images = [torch.cat(d["images"], dim=0) for d in data_dicts]
+        modalities = [torch.cat(d["modalities"], dim=0) for d in data_dicts]
 
         input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
         labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) # Dummy Value useless for generation
