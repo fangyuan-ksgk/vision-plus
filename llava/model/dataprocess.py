@@ -242,10 +242,27 @@ class LazyProcessor: # For inference with VLM
             modalities = [t[1].to(device) for t in images]
             images = [t[0].to(device) for t in images]
             data_dicts.append({"input_ids": input_ids, "images": images, "modalities": modalities})
+            
+        input_ids = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_dicts]
+        labels = [d["input_ids"][: self.tokenizer.model_max_length] for d in data_dicts]
+        images = [torch.cat(imgs, dim=0) for imgs in images]
+        modalities = [torch.cat(mods, dim=0) for mods in modalities]
 
-        return dict(input_ids = [d["input_ids"] for d in data_dicts],
-                    images = [d["images"] for d in data_dicts],
-                    modalities = [d["modalities"] for d in data_dicts])
+        input_ids = pad_sequence(input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id)
+        labels = pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX) # Dummy Value useless for generation
+
+        max_img_len = max(img.size(0) for img in images)
+        
+        images = torch.stack([torch.nn.functional.pad(img, (0, 0, 0, 0, 0, max_img_len - img.size(0))) for img in images])
+        modalities = torch.stack([torch.nn.functional.pad(mod, (0, 0, 0, max_img_len - mod.size(0))) for mod in modalities])
+
+        batch = dict(input_ids=input_ids, 
+                    labels=input_ids,
+                    attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
+                    images=images,
+                    modalities=modalities)
+    
+        return batch
     
 
 
