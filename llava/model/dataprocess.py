@@ -1,5 +1,5 @@
 import transformers 
-from typing import Dict, Sequence, List, Optional
+from typing import Dict, Sequence, List
 import copy, torch, json, os, av
 from constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN
 from PIL import Image
@@ -91,7 +91,7 @@ def preprocess_llama3(
             role = conv["from"]
             content = conv["value"]
             
-        content = content.replace("<image>", "<|start_image_id|> <image> <|end_image_id|>")
+        # content = content.replace("<image>", "<|start_image_id|> <image> <|end_image_id|>")
         
         chunks = content.split("<image>")
         new_content = chunks[0]  # Start with the first chunk (before any <image> token)
@@ -195,7 +195,7 @@ class LazyProcessor: # For inference with VLM
         self.data = {}
         self.data_args = data_args
                 
-    def query(self, question: str, media_paths: Optional[List[str]] = None, id: str = "test"):
+    def query(self, question: str, media_paths: List[str], id: str = "test"):
         if id not in self.data:
             self.data[id] = {"conversations": [], "media": []}
         
@@ -285,8 +285,8 @@ class LazyProcessor: # For inference with VLM
             batch_without_media = None
             
         return batch_with_media, batch_without_media
-    
-    
+
+
     def get_response(self, llava_model, tokenizer):
         data_w_media, data_w_text = self.process_data()
         generate_texts = []
@@ -299,9 +299,6 @@ class LazyProcessor: # For inference with VLM
             for out in output:
                 generate_texts.append(tokenizer.decode(out.tolist(), skip_special_tokens=True))
         return generate_texts
-        
-
-    
 
 
 class LazySupervisedDataset(Dataset):
@@ -530,6 +527,7 @@ def prepare_docci_data(output_json_path, image_folder="data/docci"):
     )
     
     return data_args
+
 
 def generate_text(prompt, model, tokenizer, device, generation_config):
     inputs = tokenizer(prompt, return_tensors="pt").to(device)

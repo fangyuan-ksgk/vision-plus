@@ -55,10 +55,10 @@ def prep_llava_llama_tokenizer(model_name_or_path: str = "meta-llama/Meta-Llama-
         'additional_special_tokens': [
                                     '<|start_header_id|>', 
                                     '<|end_header_id|>',
-                                    '<|start_image_id|>',
-                                    '<|end_image_id|>',
-                                    '<|start_video_id|>',
-                                    '<|end_video_id|>',
+                                    # '<|start_image_id|>',
+                                    # '<|end_image_id|>',
+                                    # '<|start_video_id|>',
+                                    # '<|end_video_id|>',
                                     ]
     })
     return tokenizer
@@ -197,6 +197,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs_embeds = self.get_model().embed_tokens(input_ids)
 
         return super().generate(attention_mask=attention_mask, inputs_embeds=inputs_embeds, **kwargs)
+
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
         """ 
